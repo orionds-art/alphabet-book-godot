@@ -1,0 +1,15 @@
+[gd_resource type="ShaderMaterial" format=3]
+
+[ext_resource type="Shader" path="res://book_import/book_paper.gdshader" id="1_shader"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_shader")
+shader_parameter/roughness_value = 0.85
+shader_parameter/ramp_a = Vector3(0.6, 0.48, 0.29)
+shader_parameter/ramp_b = Vector3(0.78, 0.67, 0.46)
+shader_parameter/color_mode = 2
+shader_parameter/wave_axis = 2
+shader_parameter/tex_scale = 5.04541540145874
+shader_parameter/tex_distortion = 0.0
+shader_parameter/tex_detail = 3.0

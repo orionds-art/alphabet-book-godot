@@ -1,0 +1,12 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://book_import/book_IMPORT.glb" id="1_glb"]
+[ext_resource type="Script" path="res://book_import/book_setup.gd" id="2_setup"]
+
+[node name="Book IMPORT" type="Node3D"]
+script = ExtResource("2_setup")
+
+[node name="Scale" type="Node3D" parent="."]
+transform = Transform3D(0.09090909090909091, 0, 0, 0, 0.09090909090909091, 0, 0, 0, 0.09090909090909091, 0, 0, 0)
+
+[node name="Book IMPORT meshes" parent="Scale" instance=ExtResource("1_glb")]

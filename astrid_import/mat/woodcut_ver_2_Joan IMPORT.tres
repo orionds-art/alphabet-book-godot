@@ -1,0 +1,256 @@
+[gd_resource type="ShaderMaterial" format=3 uid="uid://jb93f29296463"]
+
+[ext_resource type="Shader" uid="uid://cvkbi0r6sibtj" path="res://woodCUT.gdshader" id="1_o2mvp"]
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_d4g7g"]
+noise_type = 2
+seed = 408
+frequency = 0.02
+fractal_octaves = 10
+fractal_gain = 1.08
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_jgxo6"]
+noise = SubResource("FastNoiseLite_d4g7g")
+seamless = true
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_w3n3t"]
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_o2mvp"]
+noise = SubResource("FastNoiseLite_w3n3t")
+seamless = true
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_2px16"]
+noise_type = 0
+frequency = 0.0082
+fractal_type = 0
+cellular_distance_function = 2
+domain_warp_enabled = true
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_w3n3t"]
+noise = SubResource("FastNoiseLite_2px16")
+seamless = true
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_sox4j"]
+noise_type = 2
+seed = 1968
+frequency = 0.0471
+fractal_type = 0
+cellular_distance_function = 2
+cellular_return_type = 4
+domain_warp_enabled = true
+domain_warp_amplitude = 38.0
+domain_warp_frequency = 0.008
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_d4g7g"]
+width = 2048
+height = 2048
+noise = SubResource("FastNoiseLite_sox4j")
+seamless = true
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_jgxo6"]
+seed = 14
+frequency = 0.0009
+fractal_gain = 1.12
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_2px16"]
+noise = SubResource("FastNoiseLite_jgxo6")
+seamless = true
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_o2mvp")
+shader_parameter/debug_view = 0
+shader_parameter/use_cross = false
+shader_parameter/use_scumble = false
+shader_parameter/use_burnish = false
+shader_parameter/use_stipple = false
+shader_parameter/use_glare = false
+shader_parameter/use_wobble = true
+shader_parameter/use_roughness = true
+shader_parameter/use_tooth = true
+shader_parameter/use_aquatint = false
+shader_parameter/use_distance_gauge = false
+shader_parameter/gauge_ref_dist = 10.0
+shader_parameter/use_strip_taper = false
+shader_parameter/use_cone_normals = false
+shader_parameter/taper_curve = 1.0
+shader_parameter/use_taper_profile = false
+shader_parameter/flatten_falloff = 2.0
+shader_parameter/use_strip_bend = false
+shader_parameter/use_head_collide = false
+shader_parameter/scalp_sphere_radius = 0.0
+shader_parameter/head_sphere_1 = Vector4(0, 0, 0, 0)
+shader_parameter/head_sphere_2 = Vector4(0, 0, 0, 0)
+shader_parameter/head_sphere_3 = Vector4(0, 0, 0, 0)
+shader_parameter/collide_margin = 0.002
+shader_parameter/use_clump_profile = false
+shader_parameter/use_root_normal = false
+shader_parameter/ink_color = Color(0.16248902609187904, 0.12593358539576913, 0.12186634920291373, 1.0)
+shader_parameter/paper_color = Color(0.9999999999999999, 0.9999999999999999, 0.9999999999999999, 1.0)
+shader_parameter/output_grayscale = false
+shader_parameter/ink_flood = 0.0
+shader_parameter/pattern_cap = 0.9990000128746033
+shader_parameter/pattern_type = 2
+shader_parameter/wave_scale = 90.0
+shader_parameter/pattern_center = Vector2(0.0, 15.300000190734863)
+shader_parameter/pattern_pov_cam_to_obj = 1.0
+shader_parameter/pattern_pov_win = 0.0
+shader_parameter/window_scale_comp = 0.019999999552965164
+shader_parameter/object_scale_comp = 1.0
+shader_parameter/obj_axis = 0
+shader_parameter/obj_compensate_node_scale = false
+shader_parameter/line_angle = -74.49998474121094
+shader_parameter/sine_amp = 0.0
+shader_parameter/sine_freq = 29.424999237060547
+shader_parameter/parabola_curve = -3.0
+shader_parameter/parabola_span = 1.0
+shader_parameter/spoke_count = 24.0
+shader_parameter/spoke_twist = 0.0
+shader_parameter/spoke_curve_len = 2.0
+shader_parameter/glare_boost = 0.0
+shader_parameter/glare_type = 1
+shader_parameter/glare_center = Vector2(0.0, 0.0)
+shader_parameter/glare_count = 12.0
+shader_parameter/glare_len = 1.5
+shader_parameter/glare_sharp = 2.0
+shader_parameter/cross_type = 2
+shader_parameter/cross_scale = 83.0
+shader_parameter/cross_threshold = 0.24899999797344208
+shader_parameter/cross_angle = -23.145000457763672
+shader_parameter/cross_in_min = 0.0
+shader_parameter/cross_in_max = 1.0
+shader_parameter/cross_out_min = 0.0
+shader_parameter/cross_out_max = 1.0
+shader_parameter/cross_clamp = true
+shader_parameter/cross_bias = 0.0
+shader_parameter/cross_grad_amount = 0.0
+shader_parameter/cross_grad_horizontal = false
+shader_parameter/scumble_amount = 0.086667001247406
+shader_parameter/scumble_scale = 399.6666564941406
+shader_parameter/scumble_width = 1.0
+shader_parameter/scumble_width_var = 0.5
+shader_parameter/scumble_angle = -63.51799011230469
+shader_parameter/scumble_wobble = 3.3970000743865967
+shader_parameter/scumble_var_scale = 12.499999046325684
+shader_parameter/scumble_tex = SubResource("NoiseTexture2D_w3n3t")
+shader_parameter/scumble_pov_cam_to_obj = 1.0
+shader_parameter/burnish_amount = 0.08666668832302094
+shader_parameter/burnish_reach = 0.6766000390052795
+shader_parameter/burnish_grit = 250.0
+shader_parameter/burnish_pov_cam_to_obj = 1.0
+shader_parameter/burnish_gain = 1.0
+shader_parameter/internal_dir = Vector3(-2.19071364402771, 0.0, 1.8349863290786743)
+shader_parameter/internal_intensity = 0.0
+shader_parameter/scene_intensity = 2.0999999046325684
+shader_parameter/use_light_energy = true
+shader_parameter/grad_amount = 0.0
+shader_parameter/grad_horizontal = false
+shader_parameter/in_min = 0.0
+shader_parameter/in_max = 1.0
+shader_parameter/out_min = 0.0
+shader_parameter/out_max = 1.2000000476837158
+shader_parameter/clamp_result = true
+shader_parameter/use_lum_curve = false
+shader_parameter/ink_bias = 0.0
+shader_parameter/use_bias_lobe = false
+shader_parameter/bias_amount = 0.30000001192092896
+shader_parameter/bias_azimuth = -90.0
+shader_parameter/bias_elevation = 0.0
+shader_parameter/bias_spread = 1.0
+shader_parameter/bias_reach = 0.0
+shader_parameter/bias_hollow = 0.0
+shader_parameter/use_lid = false
+shader_parameter/lid_close = 0.44999998807907104
+shader_parameter/lid_darkness = 0.5
+shader_parameter/lid_softness = 0.20000000298023224
+shader_parameter/lid_affect_left_right = 0.0
+shader_parameter/lid_grain = 0.0
+shader_parameter/lid_grain_scale = 60.0
+shader_parameter/lid_curve_exposure = 0.0
+shader_parameter/use_cornea_cut = false
+shader_parameter/cornea_cut_height = 0.41999998688697815
+shader_parameter/cornea_cut_count = 2
+shader_parameter/cornea_cut_band = 0.029999999329447746
+shader_parameter/cornea_cut_width = 0.006000000052154064
+shader_parameter/use_cornea_curve = false
+shader_parameter/cornea_cut_break = 0.30000001192092896
+shader_parameter/cornea_cut_break_scale = 30.0
+shader_parameter/use_gleam_wedge = false
+shader_parameter/wedge_height = 0.33000001311302185
+shader_parameter/wedge_start = 0.0
+shader_parameter/wedge_direction = 0
+shader_parameter/wedge_width = 0.03999999910593033
+shader_parameter/wedge_taper = 6.0
+shader_parameter/cut_curve = 0.0
+shader_parameter/lid_center = Vector3(0, 0, 0)
+shader_parameter/lid_radius = 1.0
+shader_parameter/lid_light = Vector4(0, 1, 0, 0)
+shader_parameter/roughness_tex = SubResource("NoiseTexture2D_o2mvp")
+shader_parameter/roughness_amount = 0.21267443895339966
+shader_parameter/roughness_add_only = true
+shader_parameter/roughness_washout = 0.30000001192092896
+shader_parameter/roughness_scale = 27.66667366027832
+shader_parameter/rough_pov_win_to_obj = 1.0
+shader_parameter/roughness_field = 1
+shader_parameter/roughness_detail = 2.0
+shader_parameter/roughness_distortion = 12.2
+shader_parameter/wobble_tex = SubResource("NoiseTexture2D_2px16")
+shader_parameter/wobble_amount = 0.35999998450279236
+shader_parameter/wobble_scale = 15.299999237060547
+shader_parameter/wobble_pov_cam_to_obj = 1.0
+shader_parameter/wobble_field = 1
+shader_parameter/wobble_detail = 2.0
+shader_parameter/wobble_distortion = 0.0
+shader_parameter/stipple_coverage = 0.0
+shader_parameter/stipple_scale = 8.0
+shader_parameter/stipple_clump = 0.699999988079071
+shader_parameter/stipple_clump_scale = 0.15000000596046448
+shader_parameter/stipple_invert = false
+shader_parameter/stipple_falloff = 1.0
+shader_parameter/stipple_warp = 0.0
+shader_parameter/stipple_warp_cells = 1.0
+shader_parameter/stipple_warp_rotate = 0.0
+shader_parameter/stipple_lum_response = 0.0
+shader_parameter/stipple_pov_cam_to_obj = 1.0
+shader_parameter/stipple_flip = true
+shader_parameter/stipple_pivot = 0.5
+shader_parameter/stipple_flip_blend = 0.15000000596046448
+shader_parameter/tooth_tex = SubResource("NoiseTexture2D_d4g7g")
+shader_parameter/tooth_amount = 0.33282947540283203
+shader_parameter/tooth_scale = 20.0
+shader_parameter/tooth_threshold = 1.0
+shader_parameter/tooth_depth_in = 0.6499999761581421
+shader_parameter/tooth_depth_out = 1.0
+shader_parameter/tooth_dark_spare = 0.0
+shader_parameter/tooth_light_spare = 0.6497093439102173
+shader_parameter/tooth_spare_blend = 0.15000000596046448
+shader_parameter/tooth_pov_cam_to_obj = 1.0
+shader_parameter/tooth_angle = 0.0
+shader_parameter/tooth_aspect = 0.6000000238418579
+shader_parameter/tooth_field = 1
+shader_parameter/tooth_randomness = 0.81043
+shader_parameter/aquatint_tex = SubResource("NoiseTexture2D_jgxo6")
+shader_parameter/aquatint_amount = 1.0
+shader_parameter/aquatint_scale = 25.0
+shader_parameter/aquatint_threshold = 0.5430000257925
+shader_parameter/aqua_pov_win_to_obj = 0.0
+shader_parameter/use_normal_map = false
+shader_parameter/normal_depth = 6.1610002926475
+shader_parameter/use_alpha_cutout = false
+shader_parameter/alpha_from_red = false
+shader_parameter/alpha_threshold = 0.5
+shader_parameter/expr_0 = 0.0
+shader_parameter/expr_1 = 0.0
+shader_parameter/expr_2 = 0.0
+shader_parameter/expr_3 = 0.0
+shader_parameter/expr_4 = 0.0
+shader_parameter/expr_5 = 0.0
+shader_parameter/use_expressions = false
+shader_parameter/proj_type = 1
+shader_parameter/plate_step = 25.0
+shader_parameter/root_normal_blend = 0.5066666603088379
+shader_parameter/fade_px_min = 2.0
+shader_parameter/fade_px_max = 4.0
+shader_parameter/fade_level = 0.5
+shader_parameter/pattern_rest_anchor = true
+shader_parameter/plate_step_space = 1

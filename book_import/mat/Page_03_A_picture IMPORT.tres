@@ -1,0 +1,16 @@
+[gd_resource type="ShaderMaterial" format=3]
+
+[ext_resource type="Shader" path="res://book_import/book_paper.gdshader" id="1_shader"]
+[ext_resource type="Texture2D" path="res://book_import/pages/page_03.png" id="2_page"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_shader")
+shader_parameter/roughness_value = 0.9
+shader_parameter/ramp_a = Vector3(0.6, 0.48, 0.29)
+shader_parameter/ramp_b = Vector3(0.78, 0.67, 0.46)
+shader_parameter/color_mode = 1
+shader_parameter/tex_scale = 0.12045041471719742
+shader_parameter/tex_detail = 6.0
+shader_parameter/use_page_tex = true
+shader_parameter/page_tex = ExtResource("2_page")

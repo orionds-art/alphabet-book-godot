@@ -1,0 +1,57 @@
+{
+ "source": "F:\\WOODCUTS Blender\\woodcut alphabet book\\ASTRID book arena animations.blend",
+ "units_per_m": 11.0,
+ "frames": [
+  1,
+  1050
+ ],
+ "fps": 30,
+ "astrid": {
+  "pieces": 520,
+  "verts": 109354,
+  "faces": 82510,
+  "materials": {
+   "woodcut ver 2 Joan": "woodcut_ver_2_Joan",
+   "block cut hair": "block_cut_hair",
+   "woodcut ver 2 Joan LOW SHIELD": "woodcut_ver_2_Joan_LOW_SHIELD",
+   "woodcut ver 2 Joan MID SHIELD": "woodcut_ver_2_Joan_MID_SHIELD",
+   "woodcut ver 2 Joan UPPER SHIELD": "woodcut_ver_2_Joan_UPPER_SHIELD"
+  }
+ },
+ "verify": {
+  "piece_vs_bone_rest_max": 2.4397667445441584e-05,
+  "export_rig_vs_original_max": 7.62939453125e-06
+ },
+ "pattern_anchor_at_rest": [
+  0.0,
+  -0.6079999804496765,
+  0.0
+ ],
+ "root_path_m": {
+  "1": [
+   0.0377,
+   -0.8347,
+   0.0
+  ],
+  "300": [
+   1.749,
+   0.3636,
+   -0.0005
+  ],
+  "500": [
+   -0.9645,
+   0.3636,
+   -0.0114
+  ],
+  "990": [
+   -8.9969,
+   0.3636,
+   -0.1652
+  ],
+  "1050": [
+   -9.0146,
+   0.3636,
+   -0.1642
+  ]
+ }
+}

@@ -1,0 +1,21 @@
+[gd_resource type="ShaderMaterial" format=3]
+
+[ext_resource type="Shader" path="res://book_import/book_paper.gdshader" id="1_shader"]
+[ext_resource type="Texture2D" path="res://book_import/leaf01_vat_hi.png" id="3_hi"]
+[ext_resource type="Texture2D" path="res://book_import/leaf01_vat_lo.png" id="4_lo"]
+
+[resource]
+render_priority = 0
+shader = ExtResource("1_shader")
+shader_parameter/roughness_value = 0.9
+shader_parameter/color_mode = 0
+shader_parameter/base_color = Vector3(0.78, 0.67, 0.46)
+shader_parameter/use_vat = true
+shader_parameter/vat_hi = ExtResource("3_hi")
+shader_parameter/vat_lo = ExtResource("4_lo")
+shader_parameter/vat_min = Vector3(-64.34182739257812, -1.8057222366333008, -43.703094482421875)
+shader_parameter/vat_size = Vector3(128.6837158203125, 18.8394193649292, 87.4467887878418)
+shader_parameter/vat_rows = 1004
+shader_parameter/vat_first_frame = 1.0
+shader_parameter/vat_step = 1.0
+shader_parameter/vat_half_thickness = 0.031133143738874387

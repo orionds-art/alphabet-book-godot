@@ -1,0 +1,97 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://playback.gd" id="1_play"]
+[ext_resource type="PackedScene" path="res://book_import/book_IMPORT.tscn" id="2_book"]
+[ext_resource type="PackedScene" path="res://astrid_import/astrid_IMPORT.tscn" id="3_astrid"]
+[ext_resource type="Texture2D" path="res://paper/BLANK WATERCOLOR PAPER.png" id="4_paper"]
+[ext_resource type="Shader" path="res://paper/paper_scan.gdshader" id="5_scan"]
+
+[sub_resource type="ShaderMaterial" id="mul"]
+shader = ExtResource("5_scan")
+shader_parameter/contrast = 4.000
+shader_parameter/scan_mean = 0.8435
+
+[sub_resource type="Environment" id="env"]
+background_mode = 1
+background_color = Color(1.0000, 1.0000, 1.0000, 1)
+ambient_light_source = 2
+ambient_light_color = Color(1, 1, 1, 1)
+ambient_light_energy = 0.0
+tonemap_mode = 0
+glow_enabled = false
+
+[node name="Alphabet Book MAIN" type="Node3D"]
+script = ExtResource("1_play")
+
+[node name="Book (import)" parent="." instance=ExtResource("2_book")]
+
+[node name="Astrid (import)" parent="." instance=ExtResource("3_astrid")]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("env")
+
+[node name="Book Light" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.785161, -0.618163, 0.037384, 0.425939, 0.582857, 0.691992, -0.449553, -0.527402, 0.720936, 0.000000, -0.323596, 0.000000)
+light_energy = 0.9549
+light_cull_mask = 4294967294
+shadow_enabled = true
+directional_shadow_max_distance = 40.0
+
+[node name="Book Camera" type="Camera3D" parent="."]
+transform = Transform3D(1.000000, 0.000000, 0.000000, 0.000000, 0.802910, 0.596100, 0.000000, -0.596100, 0.802910, -2.924545, 8.363637, 11.636364)
+fov = 36.0000
+near = 0.05
+far = 100.0
+current = true
+
+[node name="Astrid Follow" type="Node3D" parent="."]
+
+[node name="Astrid Camera" type="Camera3D" parent="Astrid Follow"]
+transform = Transform3D(1.000000, 0.000000, 0.000000, 0.000000, 1.000000, -0.000000, 0.000000, 0.000000, 1.000000, -0.000000, 0.850087, 3.691637)
+fov = 25.3608
+near = 0.02
+far = 100.0
+
+[node name="Astrid Body Light" type="SpotLight3D" parent="Astrid Follow"]
+transform = Transform3D(0.044065, -0.981103, 0.188403, 0.805477, 0.146450, 0.574246, -0.590986, 0.126451, 0.796709, 0.270068, 1.805644, 2.545349)
+light_energy = 3.27522
+light_cull_mask = 1
+shadow_enabled = true
+spot_range = 30.0
+spot_attenuation = 2.0
+spot_angle = 30.040
+spot_angle_attenuation = 1.956
+
+[node name="Light" type="SpotLight3D" parent="Astrid Follow"]
+transform = Transform3D(0.365466, -0.899874, 0.238037, 0.157885, 0.311950, 0.936888, -0.917337, -0.304818, 0.256084, 0.270068, 2.644171, 0.400934)
+light_energy = 1.17780
+light_cull_mask = 1
+shadow_enabled = true
+spot_range = 30.0
+spot_attenuation = 2.0
+spot_angle = 36.534
+spot_angle_attenuation = 1.956
+
+[node name="Paper" type="CanvasLayer" parent="."]
+layer = 1
+
+[node name="Scan" type="TextureRect" parent="Paper"]
+material = SubResource("mul")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+texture = ExtResource("4_paper")
+expand_mode = 1
+stretch_mode = 6
+mouse_filter = 2
+
+[node name="HUD" type="CanvasLayer" parent="."]
+layer = 2
+
+[node name="Frame" type="Label" parent="HUD"]
+offset_left = 16.0
+offset_top = 12.0
+offset_right = 400.0
+offset_bottom = 40.0
+theme_override_colors/font_color = Color(0.2, 0.1, 0.1, 1)
+text = "frame 1"

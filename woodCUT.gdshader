@@ -1,0 +1,5281 @@
+// =============================================================
+//  WOODCUT SHADER  -  v36
+// =============================================================
+//  CHANGELOG
+//  9 Oct 2026 - obj_box_projection (Pattern group, default OFF = unchanged): per-face axis
+//         pair in object space, for buildings (district1). Then obj_wall_aligned (default
+//         OFF): each face measured in its own wall / slope frame. Then use_anti_moire
+//         (Anti_Moire group, default OFF): Blender's Line Fade, Solid mode. Then proj_type
+//         (Planar / View Aligned / Box, default Planar) + plate_step, as Blender (characters).
+//         Then use_edge_aa (Enable, default OFF) + edge_aa_width: 1 px soft waterline edge.
+//  10 Oct 2026 - Tone_Plate group (use_tone_plate, default OFF = unchanged): three-colour
+//         chiaroscuro print -- cream paper_color, a brown tone_color block over it, cut to
+//         cream above tone_cut_level (or everywhere with tone_cut_material), ink on top.
+//         debug_view 16 = Tone Plate.
+//  v36  - from the Blender port (30 Sept 2026), every default = v35
+//         behaviour exactly: roughness_washout (Noise.SeaRoughness),
+//         pattern_cap (Ink), use_lum_curve + lum_curve (Map_Range),
+//         the Bias_Lobe group, use_light_energy (Scene_Light), and
+//         the Bias Lid group (was Eyelid; lid shadow on an eyeball globe, pole from
+//         a hand angle / the scene light / one chosen light node),
+//         tooth_field = Voronoi Edges (the port's Paper Tooth), and
+//         roughness_field = Noise (the port's Sea Roughness), and
+//         wobble_field = Noise (the port's Wobble).
+//
+//  v35  - BACK UNDER THE INSTANCE UNIFORM CEILING. v34 sat on
+//         sixteen of them, and past the limit the overflow aliases
+//         onto earlier slots: whichever parameter is pushed LAST
+//         wins a slot belonging to something else.
+//
+//         The symptom is unmistakable once seen. Wave persists in
+//         the render while every wave dial reads zero, because the
+//         dial is not what is wrong - root_normal_blend is pushed
+//         after wave_amount and lands in its slot. Nudging the wave
+//         slider by hand fixes it, since that write happens last;
+//         the next bake pushes root_normal_blend again and the wave
+//         comes back. Any parameter can play either part.
+//
+//         taper_curve and flatten_falloff are now plain uniforms,
+//         which takes the count to fourteen and leaves headroom.
+//         Both are curve SHAPES rather than amounts, the kind of
+//         dial that is usually decided once for a character, and
+//         taper_curve already lived beside taper_profile, which has
+//         to be per material anyway because samplers cannot be
+//         instance uniforms. SET THESE ON THE MATERIAL NOW - the
+//         bake no longer pushes them.
+//
+//  v34  - clump. Strands steer toward a shared guide so they close
+//         into locks, and under a threshold a lock reads as one
+//         solid mass with clean paper between it and the next.
+//         Negative steers AWAY: flyaways, frizz, and a way to open
+//         a mass that has gone too solid.
+//
+//         The vertex stage knows nothing about neighbours, since
+//         MultiMesh instances are independent, so the BAKE does the
+//         neighbour work and hands the answer over in
+//         INSTANCE_CUSTOM. Needs HAIR BAKE v12 or later.
+//
+//         Steers the TANGENT, like the bend and the collision, so
+//         arc length survives and normals follow the frame. Moving
+//         vertices toward a guide would need the guide's whole
+//         curve, which is not stored, and would undo v28.
+//
+//         The gap is tracked against an UNSTEERED reference path
+//         integrated alongside the real one. Every strand in a zone
+//         shares the same bend, wave and curl, so a guide's curve is
+//         this strand's curve displaced by the root offset - which
+//         means the gap does not close on its own and the steering
+//         has to do all of it. The reference is how the loop knows
+//         how much is left.
+//
+//         INSTANCE_CUSTOM is now read by this shader:
+//           rgb = unit direction to the guide, in the strand's own
+//                 space, packed 0..1
+//           a   = distance to the guide in local units. 0 = this
+//                 strand belongs to no clump and is left alone.
+//
+//  v33  - flatten. The cross-section can be squashed into an
+//         ellipse, strongest at the base, so a tube reads as a
+//         flattened lock pressed against the head rather than as
+//         a cylinder stuck to it.
+//
+//         Z, not X. The bake puts +Z along the scalp normal, so
+//         flattening Z presses the lock against the skull and
+//         leaves its width lying in the tangent plane. Flattening
+//         X would stand the lock on edge instead.
+//
+//         This is the one place v30's rule is deliberately broken.
+//         v30 scaled X and Z together to stop tubes becoming
+//         ellipses; here the ellipse IS the point. So the normal
+//         has to be corrected by the inverse transpose - NORMAL.z
+//         divided by the same factor - or the geometry flattens
+//         while the shading goes on describing a round tube. In a
+//         shader whose whole luminance arm is dot(NORMAL, LIGHT)
+//         that is the entire difference between a flattened lock
+//         and a cylinder that happens to be thin. Same failure as
+//         a bend that forgets to rotate its normal, v23.
+//
+//  v32  - head collision. A strand can no longer bend, wave or
+//         curl its way into the skull.
+//
+//         The constraint acts on the TANGENT inside the bend
+//         integrator, never on the finished vertex. Pushing a
+//         vertex out of the head would move it off the arc and
+//         undo v28 - the strand would stretch wherever it grazed.
+//         Turning the direction of travel instead keeps every step
+//         exactly one segment long, so a deflected strand is the
+//         same length as a free one. It just lies along the scalp
+//         instead of through it.
+//
+//         Spheres rather than an ellipsoid: a sphere is the one
+//         collider whose test survives the rotation into each
+//         strand's own space unchanged.
+//
+//         NOTE: the scalp sphere reads COLOR.rgb and needs HAIR
+//         BAKE v10 or later, which writes the scalp normal in the
+//         strand's space. v9 wrote it in the node's space and the
+//         sphere would be placed in the wrong direction.
+//
+//  v31  - taper can follow a CurveTexture instead of a power
+//         function, so a clump can swell partway up or flare at the
+//         tip. Per material, not per node - samplers cannot be
+//         instance uniforms.
+//
+//  v30  - width and taper now scale X and Z together, so tubes stay
+//         round instead of being squashed to ellipses. Flat cards
+//         are unaffected, since their z is zero - one code path
+//         serves both.
+//       - use_cone_normals: tilts the normal to follow a taper, so
+//         a tapered tube shades as a cone rather than a cylinder.
+//
+//  v29  - strand_width instance uniform added, so width comes from
+//         the shader and the instance can be scaled UNIFORMLY for
+//         length. Non-uniform instance scale is applied after
+//         vertex() and was distorting the bent arc past ~9 degrees.
+//       - wave phase now read per strand from COLOR.a, with the
+//         wave_phase uniform as a zone-wide offset on top.
+//
+//  v28  - the bend is now arc-length preserving. It integrates a
+//         frame up the strand rather than rotating vertices about
+//         the root, which was stretching the hair badly past about
+//         eight degrees. bend_angle range restored to +/-180 now
+//         that large angles behave.
+//         NOTE: shapes will differ from v27 at the same settings -
+//         these are the correct ones. Expect to retune.
+//
+//  v27  - narrowed ranges and added explicit step sizes to the
+//         strip controls and the parabola dials. wave_amount was
+//         0-90 degrees and curl_twist -720 to 720; both put the
+//         entire useful range into a few pixels of slider.
+//         NOTE: values outside a new range will clamp on paste -
+//         check wave_amount and curl_twist after loading.
+//
+//  v26  - the eleven numeric strip controls (taper, bend, wave,
+//         curl, root normal blend) are now INSTANCE uniforms, so
+//         every hair node can carry its own values while sharing
+//         one material file. Enable flags stay plain uniforms -
+//         instance uniforms cannot be bools.
+//
+//  v25  - waves and curls on the strip bend. wave_amount and
+//         wave_count add an oscillating turn; curl_twist rotates
+//         the bending plane up the strand. Both run through the
+//         existing Rodrigues rotation, so normals follow.
+//
+//  v24  - root normal blend added. Bends the shading normal toward
+//         the surface a strand grew from, so a head of hair shades
+//         as a volume instead of thresholding into one flat mass.
+//         Reads the scalp normal from MultiMesh instance colors.
+//
+//  v23  - strip bend added, gated and inert by default. Rodrigues
+//         rotation weighted by height, applied to BOTH position and
+//         NORMAL - a bend that left the normal alone would make
+//         every strand shade identically regardless of its curve.
+//
+//  v22  - strip taper added, gated and inert by default. Narrows a
+//         card toward +Y in the vertex stage so hair strands can be
+//         modelled as plain rectangles and shaped live. v_obj is
+//         captured BEFORE the taper so hatching spacing stays even
+//         along the strand.
+//
+//  v21  - obj_compensate_node_scale added. Object space is measured
+//         before the node transform, so instances of one mesh at
+//         different scales showed different line spacing from
+//         identical settings. This puts the coordinate in world
+//         units instead.
+//
+//  v20  - output_grayscale added. Writes exact 0.0 / 1.0 instead of
+//         ink and paper colours, so a post shader on the
+//         SubViewportContainer can own the palette for the whole
+//         frame. See FEEDING A POST SHADER in the notes for what
+//         post stages can and cannot do to binary input.
+//
+//  v19  - [LIGHT_COMBINE_MAX, reversible - search that tag]
+//         DIFFUSE_LIGHT now combined with max() instead of plain
+//         assignment. Fixes jagged wedges of black cast onto
+//         distant geometry by small spot lights, and makes multiple
+//         lights usable: brightest wins rather than last-processed
+//         wins.
+//
+//  v18  - alpha_cut renamed alpha_threshold. It is a threshold;
+//         the name should say so.
+//
+//  v17  - alpha cutout added, via ALPHA_SCISSOR_THRESHOLD. Leaf
+//         cards and other texture-shaped geometry can now carry the
+//         woodcut material and still cast cut-out shadows. Discard
+//         happens before light(), so cut pixels cost nothing.
+//
+//  v16  - the cross arm now has its own levels (in/out min and max,
+//         clamp, bias) and its own screen-space gradient, applied
+//         on top of the main map range. cross_threshold stays what
+//         it always was: a binary on/off gate, not a levels dial.
+//
+//  v15  - distance gauge: object-space coordinates kept (so nothing
+//         swims) while line FREQUENCY steps by powers of two with
+//         distance, holding on-screen density roughly constant.
+//         Drives pattern, cross and scumble. This is also the LOD
+//         mechanism - each band gets a coarser tool.
+//
+//  v14  - parabolic pattern fixed. The bow grows with the SQUARE of
+//         distance from centre, so in window space (coords 0..50)
+//         it exploded. Now normalised by parabola_span and
+//         expressed in line widths.
+//       - tonal gradient added: a screen-space ramp on luminance,
+//         so a backdrop can get denser toward the ground with no
+//         light involved.
+//
+//  v13  - pattern_pov_win added: locks the pattern flat to the
+//         screen, which is what a sky dome needs to avoid pole
+//         pinching. window_scale_comp compensates for screen UV
+//         spanning 0..1 instead of world units.
+//
+//  v12  - cross_type added. The cross arm can now be any pattern
+//         shape, not just straight lines, so one material can carry
+//         two different mark systems at two angles. Generators
+//         refactored behind a single gen_pattern() dispatcher.
+//
+//  v11  - expression system: a Texture2DArray of normal maps with
+//         six independent weights, summed as deviations from flat.
+//         Behaves like morph sliders - several can be held at once
+//         and partial values blend. Base normal_tex stays as a
+//         static detail layer underneath.
+//
+//  v10  - added a fragment() that binds a normal map, so NORMAL
+//         inside light() can be perturbed without moving geometry.
+//         Off by default; needs UVs and tangents on the mesh.
+//
+//  v09  - tooth_tilt replaced by a tonal WINDOW: tooth_dark_spare,
+//         tooth_light_spare and tooth_spare_blend. A tilt traded
+//         one end against the other; a window keeps the midtones at
+//         full strength and only fades the end being protected.
+//
+//  v08  - tooth_tilt added. Biases the whole paper tooth arm
+//         toward the lights or the darks, so it can be pushed hard
+//         enough to read in midtones without making solid shadows
+//         spotty. Applies to both depth_in and depth_out.
+//
+//  v07  - tooth_edge_width renamed tooth_depth_in, and
+//         tooth_depth_out added: ink drawn OUT of a stroke along
+//         the paper fibre. Both read the same field, so
+//         tooth_aspect shapes both.
+//
+//  v06  - tooth_aspect added. Stretches the tooth field along one
+//         axis so bites read as elongated wedges driven in from the
+//         side of a stroke rather than round nibbles.
+//
+//  v05  - added a Roughness debug view, so the raw sample can be
+//         inspected directly. Flat white there means the texture
+//         slot is empty.
+//
+//  v04  - sea roughness is now ADD-ONLY by default. It used to be
+//         bidirectional, which punched light flecks into solid
+//         shadow. Removing ink in the darks is paper tooth's job.
+//         roughness_add_only restores the old behaviour if unticked.
+//
+//  v03  - scumble_wobble now ONLY bends the cuts. It used to drive
+//         cut WIDTH as well, and that term was unscaled: at wobble
+//         4 it swung width by +/-2 on a 0..1 range, so the width
+//         saturated and swamped the bending. Raising wobble just
+//         looked like lowering scumble_amount.
+//       - width variation moved to its own dial, scumble_width_var,
+//         defaulting to 0.
+//
+//  v02  - scumble_wobble range raised to 0-8. At scumble_scale
+//         3000 a single cut spacing is a tiny physical distance,
+//         so one unit of wander is nearly invisible. Values above
+//         1 are expected at high scale.
+//
+//  v01  First numbered build. Contains, relative to the last
+//       unnumbered file:
+//       - all angles in DEGREES (line, cross, scumble, tooth,
+//         stipple_warp_rotate). Convert old radian values: x 57.3
+//       - wobble_amount now reads in LINE WIDTHS (divide old by
+//         ~0.0063 at wave_scale 1000; 0.002 -> 0.32)
+//       - scumble_wobble now reads in CUT WIDTHS (0.02 -> ~0.06)
+//       - wobble_scale and scumble_var_scale lost their baked-in
+//         0.01 multiplier: DIVIDE old values by 100
+//       - burnish hashes in 3D, fixing the vertical stripes; grit
+//         cells are smaller at the same number
+//       - better-distributed hashes throughout
+//       - ink_flood added for night scenes
+//       - stipple: invert, falloff, warp, warp rotation
+// =============================================================
+
+// =============================================================
+//  WOODCUT / ENGRAVING SHADER  -  Godot 4, Forward+
+// =============================================================
+//  Sea-and-ridges model:
+//    PATTERN arm   -> terrain (ridges and valleys)
+//    LUMINANCE arm -> sea level
+//    step()        -> the waterline. Land = ink, submerged = paper.
+//
+//  Shadows are preserved because ATTENUATION (which carries shadow
+//  map data) is folded into luminance BEFORE the threshold. A cast
+//  shadow therefore lowers sea level, and reads as DENSER HATCHING
+//  rather than as a grey patch. That is how an engraving behaves.
+// =============================================================
+
+shader_type spatial;
+render_mode ambient_light_disabled, specular_disabled;
+
+// -------------------------------------------------------------
+//  DEBUG
+// -------------------------------------------------------------
+// Solo any single arm. "Ink only" shows the threshold result with no
+// noise applied at all, which is the fastest way to tell whether an
+// artefact comes from the pattern or from a noise arm.
+group_uniforms X_Debug;
+// v36: 10 = Bias Lobe -- the lobe's WEIGHT, 0..1 (black = no lift, white =
+// full bias_amount), the port's Bias Lobe debug view. Dark red where
+// use_bias_lobe is off, so a dead switch shows up.
+// v36: 11 = Bias Lid -- white under the lid, black where it is open; dark red
+// where use_lid is off.
+// v36: 12 = Lid Light -- only what the Lid Light Curve adds (brighter = more).
+// v36: 13 = Lid Height -- the Lid Light Curve's left->right axis painted on
+// the eye (black = 0, bottom of the eyeball; white = 1, top), to read where
+// the lower eyelid falls on the curve.
+// v36: 14 = Cornea Cut -- white where the cornea cut lifts the ink.
+// v36: 15 = Cornea Height -- the cornea cut's axis (the eyeball's own
+// up/down, black = bottom, white = top), to place the cuts.
+uniform int debug_view : hint_enum("Final,Pattern,Luminance,Tooth,Aquatint,Stipple,Scumble,Burnish,Roughness,Ink only,Bias Lobe,Bias Lid,Lid Light,Lid Height,Cornea Cut,Cornea Height,Tone Plate,Labels,Panel UVs") = 0;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  INK / PAPER
+// -------------------------------------------------------------
+// -------------------------------------------------------------
+//  ENABLE
+//  Master switches. Untick to remove an arm entirely, without
+//  losing its tuned values. Use these to bisect an artefact:
+//  turn everything off, confirm it is gone, then switch arms back
+//  on one at a time until it returns.
+// -------------------------------------------------------------
+group_uniforms X_Enable;
+// Cross-hatch: a second set of lines that prints only in the deepest shadow (settings in Cross).
+uniform bool use_cross     = true;
+// Scumble: white cross-cuts that eat into the ink in the lights (settings in Scumble).
+uniform bool use_scumble   = true;
+// Burnish: grit wear that rubs the ink away at the brightest highlights (settings in Burnish).
+uniform bool use_burnish   = true;
+// Stipple: clumped dots for stone / brick texture (settings in Stipple).
+uniform bool use_stipple   = true;
+// Glare: rays of extra light spreading from Glare Center (settings in Glare).
+uniform bool use_glare     = true;
+// Wobble: the lines waver sideways along their length (settings in Noise.Wobble).
+uniform bool use_wobble    = true;
+// Sea roughness: noise that breaks the waterline, so line edges go ragged (settings in Noise.SeaRoughness).
+uniform bool use_roughness = true;
+// Paper tooth: paper-fibre bites into the lines, and ink drawn out from them (settings in Noise.PaperTooth).
+uniform bool use_tooth     = true;
+// Aquatint: a grainy tone laid over the paper (settings in Noise.Aquatint).
+uniform bool use_aquatint  = true;
+// Anti-Moire (settings in the Anti_Moire group)
+uniform bool use_anti_moire = false;   // Anti-Moire (settings in the Anti_Moire group)
+// Edge Anti-Alias (width in the Anti_Moire group)
+uniform bool use_edge_aa   = false;   // Edge Anti-Alias (width in the Anti_Moire group)
+// Edge Anti-Alias on the Paper Tooth bite / bleed (same width)
+uniform bool use_tooth_aa  = false;   // Edge Anti-Alias on the Paper Tooth bite / bleed (same width)
+group_uniforms;
+
+group_uniforms X_Ink_and_Paper;
+// The ink: the colour of the printed lines.
+uniform vec3 ink_color   : source_color = vec3(0.05, 0.04, 0.04);
+// The paper: the colour between the lines.
+uniform vec3 paper_color : source_color = vec3(0.92, 0.90, 0.84);
+
+// GRAYSCALE OUT. Writes exact 0.0 for ink and 1.0 for paper,
+// ignoring ink_color and paper_color entirely, so a post shader on
+// the SubViewportContainer owns the paper and ink colour for the
+// whole frame. Use this when the woodcut characters share a
+// container with the Lucifers, so both get one paper, one grade.
+// Exact values matter: a post shader that does
+// dot(src.rgb, luma_weights) recovers 0.0 and 1.0 cleanly, where a
+// near-black ink_color would come back as some weighted fraction.
+uniform bool output_grayscale = false;
+
+// NIGHT FLOOD. Lifts the pattern's floor, so terrain never drops
+// below this height and the sea can no longer clear it. Everything
+// under this luminance goes solid ink; only above it does line work
+// survive. 0 = daytime. 0.5 - 0.8 = night.
+// This is the "apparent inversion": the sheet stays light paper with
+// dense hatching reading as darkness, rather than becoming black
+// paper with white marks. Figures come to read by their highlights
+// because the highlights are the only place with bare paper left.
+// Done by raising the PATTERN rather than lowering luminance, so
+// scumble and burnish still see the true 0..1 luminance range and
+// keep firing on the real highlights. Lowering luminance instead
+// would flood the ink but silence both of those arms.
+uniform float ink_flood : hint_range(0.0, 0.95) = 0.0;
+// PATTERN CAP (v36, from the Blender port). Ceiling on the pattern
+// before ink_flood. At 1 the sine's peak touches 1 and prints a
+// hairline even where lum clamps at 1 in full light; just under 1
+// (0.985) those hairlines go. 1 = off.
+uniform float pattern_cap : hint_range(0.0, 1.0) = 1.0;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  PATTERN ARM
+// -------------------------------------------------------------
+group_uniforms X_Pattern;
+// The line pattern: Lines, Sinusoid (wavy), Parabolic (bowed), Rings, Spokes -- or FLAT (12 Oct 2026, Orion: the
+// street as thick paper with ink bleeding into it): no lines at all; wherever the light falls below Flat Level the
+// paper prints solid ink, above it bare paper. Shadows become ink washes, cobble joints thin ink creases, Wall Skirt
+// the ink leaking from the building bases. Anti-moire and Coarsen have nothing to do in Flat and are skipped.
+uniform int pattern_type : hint_enum("Lines,Sinusoid,Parabolic,Rings,Spokes,Flat") = 0;
+// FLAT: how dark the light must get before ink appears (higher = more ink: ~0.2 only deep shade, ~0.5 every shadow)
+uniform float flat_level : hint_range(0.0, 1.0) = 0.35;
+// FLAT EDGE LINES (12 Oct 2026, Orion: "the boundary of all the ink ... could be a line ... all the shadow edges are
+// sinusoid"): around Flat Level the ink (and the tone plate's edge) breaks into lines instead of a pixel staircase.
+// How far either side of Flat Level the lined fringe may reach, in light (0 = a hard edge, as before). Keep it small
+// (~0.1-0.3) so only the INK's edge gets lines: larger lets them reach out to the tone plate's paler shade edges too.
+// Only cast shadows' edges count; the tone plate's own edge never gets lines.
+uniform float flat_edge_band : hint_range(0.0, 2.0) = 0.0;
+// How wide the lined fringe is, in screen pixels. Only cast shadows' edges get it -- the cobbles' joints and slow
+// shading never do.
+uniform float flat_edge_px : hint_range(0.5, 40.0) = 6.0;
+// The edge's line type.
+uniform int flat_edge_pattern : hint_enum("Lines,Sinusoid,Parabolic,Rings") = 1;
+// The edge's line spacing, x Wave Scale (lower = wider lines).
+uniform float flat_edge_scale : hint_range(0.05, 2.0) = 0.35;
+// Sinusoid edge lines: how far each line swings (in the same units as Sine Amp) and how often (as Sine Freq). The edge
+// has its own pair; the X Pattern > Sinusoid ones don't touch it.
+uniform float flat_edge_amp : hint_range(0.0, 0.2) = 0.006;
+// FLAT SPREAD (13 Oct 2026, Orion: at dusk the street went from bare to all ink in ~8 real seconds -- after sunset it is lit
+// almost evenly, so it all crosses the ink line together). An UNEVEN ink line: higher near the walls (the shoulders ink
+// first) and varying in broad soft patches, so ink creeps across the street as the light falls. In light units (0 = off;
+// ~0.15-0.35); put it on the Evening Schedule to widen it only in the evening.
+uniform float flat_spread : hint_range(0.0, 1.0) = 0.0;
+// How much of the spread follows the walls (1 = shoulders first, straight lines in toward the middle; 0 = patches only).
+uniform float flat_spread_walls : hint_range(0.0, 1.0) = 0.6;
+// How far from the walls the shoulders reach, metres.
+uniform float flat_spread_wall_metres : hint_range(0.2, 10.0) = 2.5;
+// The size of the patches, metres.
+uniform float flat_spread_patch_metres : hint_range(0.5, 20.0) = 4.0;
+uniform float flat_edge_freq : hint_range(0.0, 200.0) = 23.0;
+// FLAT ROUND (19 Oct 2026, Orion, the night street without the edge fringe: "ink blot is ok as long as there are some
+// controls to make it smooth and not angular"). Measured: the blot's straight cuts are the cobbles' joints and relief
+// (the ink line follows them), its saw teeth and scallops the wall distance map's 1 m compression blocks (Flat Spread
+// reads it -- a Lossless import of wall_distance.png removes them at no cost; a blurred read of it in here cost ~0.3 ms
+// even switched off, so there is none; nor a wobble noise on the line: with Round Cobbles it cost ~0.1 ms switched off).
+// Both off by default; off costs nothing (measured, 19 Oct 2026).
+// Round Cobbles: how much the INK's edge ignores the cobbles (joints, relief, worn middles, corners); 1 = the blot is
+// cut from the street's plain light, so no straight cuts along the joints. The tone plate keeps its joints.
+uniform float flat_round_cobbles : hint_range(0.0, 1.0) = 0.0;
+// Soft Px: the ink's edge eased over this many screen pixels instead of a hard pixel staircase (0 = hard, as before).
+uniform float flat_round_soft_px : hint_range(0.0, 4.0) = 0.0;
+// Line density: line cycles per unit of the projection (higher = finer, closer lines).
+uniform float wave_scale       = 40.0;
+// origin for rings and spokes, in the active coordinate space
+uniform vec2 pattern_center = vec2(0.0, 0.0);
+// LOW = camera-anchored (flat, printed)   HIGH = object space (wraps form)
+uniform float pattern_pov_cam_to_obj : hint_range(0.0, 1.0) = 0.0;
+// WINDOW LOCK. Overrides the above and puts the pattern flat on the
+// screen. Meant as an on/off - 0 or 1, not a blend, since screen UV
+// and world units are not comparable quantities.
+// This is what a SKY DOME needs. Object space on a sphere pinches
+// hard at the zenith and nadir, so marks crowd into mush at the
+// poles; view space planar-projects and crowds at the horizon
+// instead. Flat on the page has neither problem, and it is also
+// what an engraved sky actually is - marks belonging to the paper,
+// not to a modelled object.
+// The trade: screen-locked marks do not slide when the camera pans.
+// Correct for a fixed or slowly moving camera, wrong for free look.
+uniform float pattern_pov_win : hint_range(0.0, 1.0) = 0.0;
+// Scale compensation for window space, which spans 0..1 rather than
+// world units. Around 0.02 gets a sky near foreground line density.
+uniform float window_scale_comp = 0.02;
+// object space is a different unit scale than view space; tune to match
+uniform float object_scale_comp = 1.0;
+// Which pair of object axes builds the 2D coordinate.
+//   XY  spheres and upright meshes
+//   XZ  floors and planes (PlaneMesh has no Y variation)
+//   ZY  walls facing X
+uniform int obj_axis : hint_enum("XY,XZ,ZY") = 0;
+// BOX PROJECTION (9 Oct 2026, the city): in object space each face picks the axis pair it
+// faces most - floors / roofs XZ, walls facing X ZY, walls facing Z XY - so every wall of a
+// building gets the same line spacing instead of streaks on the ones edge-on to obj_axis.
+// Overrides obj_axis for the pattern. OFF = obj_axis as before.
+uniform bool obj_box_projection = false;
+// WALL ALIGNED (9 Oct 2026, the city): in object space each face is measured in its OWN
+// frame - across = the face's horizontal direction, up = its slope direction - so every
+// wall gets the same line spacing and the same line_angle relative to the wall, however the
+// building is turned; roof slopes are measured along the slope. Flat faces (floors, flat
+// roofs) fall back to XZ. Wins over obj_box_projection and obj_axis. OFF = unchanged.
+uniform bool obj_wall_aligned = false;
+// OBJ PROJECTION (9 Oct 2026, ported from Blender, same names and values so the exporter
+// carries them over): Planar = obj_axis as above. VIEW ALIGNED = the offset from the
+// object's origin measured along the CAMERA's right/up axes: the projection the camera
+// sees, so it never compresses at a grazing angle, but anchored to the object - a dolly or
+// pan does not move it, only an orbit turns it. For characters. Box = obj_box_projection.
+// Measured in model units, like Planar, so Joan's scales read the same as in Blender.
+uniform int proj_type : hint_enum("Planar,View Aligned,Box") = 0;
+// PLATE STEP (View Aligned only), degrees: the projection follows the camera in jumps this
+// big instead of continuously - between jumps the hatching is glued to the object, then it
+// re-lays square to the view all at once, like a plate re-cut every N degrees. 0 = continuous.
+uniform float plate_step : hint_range(0.0, 90.0) = 0.0;
+// PLATE STEP SPACE (18 Oct 2026, Orion: "sea roughness changes too frequently - it is not plate stepping"). World = the
+// camera's angle is snapped in the world (as before): right for things that never turn, but when the object itself
+// turns -- a character walking a curving street with the camera following -- the held plate slides with her every
+// frame (lines and every noise on obj_c: wobble, sea roughness, paper tooth). Object = snapped relative to the
+// object's own facing: the plate only re-lays when the camera has swung 25 deg (or whatever Plate Step is) round HER.
+uniform int plate_step_space : hint_enum("World,Object") = 0;
+// REST ANCHOR (11 Oct 2026, Orion: on the walking teen's face the line work slides up and down with every step).
+// A skinned character's VERTEX is already bent by the skeleton, so "object space" is the model's frame at her feet:
+// the walk lifts the head through hatching that stands still. On = the pattern (and wobble / roughness / stipple /
+// burnish, which share it) reads each vertex's REST-POSE position instead, so the lines are glued to her skin and
+// ride with the head. Needs a mesh exported with its rest positions (wc2_godot_export.py: UV3 / UV4 = CUSTOM0);
+// on any other mesh it collapses the pattern, so leave it off there.
+uniform bool pattern_rest_anchor = false;
+// NODE SCALE COMPENSATION. Object space is MODEL space, which is
+// measured BEFORE the node's transform. So an instance scaled to 3x
+// carries a pattern stretched to 3x with it, and two copies of the
+// same mesh at different scales show different line spacing from
+// identical settings.
+// Tick this and the coordinate is multiplied by the node's scale,
+// putting it in world units - so equal wave_scale gives equal
+// on-screen spacing no matter how each instance is scaled.
+// Leave it OFF if you WANT the pattern to scale with the object,
+// e.g. a prop that should keep its line gauge as it grows.
+uniform bool obj_compensate_node_scale = false;
+// All angles are in DEGREES. 90 is perpendicular to 0.
+uniform float line_angle       : hint_range(-180.0, 180.0) = 0.0;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  PATTERN SHAPE CONTROLS
+//  Only the ones matching pattern_type do anything.
+// -------------------------------------------------------------
+group_uniforms X_Pattern.Sinusoid;
+// how far each line swings sideways
+uniform float sine_amp  : hint_range(0.0, 2.0) = 0.2;
+// how many swings along the line's length
+uniform float sine_freq = 5.0;
+group_uniforms;
+
+group_uniforms X_Pattern.Parabolic;
+// bow of the curve. Negative bends the other way.
+uniform float parabola_curve : hint_range(-2.0, 2.0, 0.002) = 1.0;
+// Distance over which the full curve develops. The bow grows with
+// the SQUARE of distance from centre, so without this it explodes
+// the moment the coordinate range is large - which is exactly what
+// happens in window space, where coords run 0..50 instead of 0..2.
+// Set it near the size of the surface: ~1 on a 2m figure, ~25 on a
+// window-space backdrop.
+uniform float parabola_span : hint_range(0.1, 100.0, 0.05) = 1.0;
+// FROM PANEL (10 Oct 2026): put the parabola's vertex at the centre of each PANEL (the per-panel UVs of the
+// district building sets) instead of the object origin. A merged district chunk's origin is the world origin,
+// so without this every wall sits hundreds of spans from the vertex and Curve / Span do nothing useful.
+// Pattern Center then offsets the vertex within each panel (metres). Off = as before.
+uniform bool parabola_from_panel = false;
+// FROM WORLD (12 Oct 2026, Orion: moire where one wall overlaps another -- crumple and deckle cut the building edges
+// into many small panels, each with its own parabola centre, so neighbouring slivers clash). On: the vertex sits at the
+// centre of a CELL of a grid laid on each wall by world position (wins over From Panel). Flaps and leaves in the same
+// plane as their wall get the wall's own lines. Floors / flat roofs use a level grid.
+uniform bool parabola_from_world = false;
+// the cells' size in metres (one parabola per cell)
+uniform float parabola_world_cell : hint_range(0.5, 30.0) = 4.0;
+// the wall's direction is snapped to steps this big (degrees), so the slightly bent facets of a crumpled wall share
+// one frame and one set of lines (0.1 = no snapping)
+uniform float parabola_world_snap : hint_range(0.1, 45.0) = 30.0;
+// KEEP SPACING (10 Oct 2026, Orion: the head printed ~4x finer than the body -- far from the vertex the
+// bowed lines lean over, which packs them closer and thins them). 1 = the lines are spread out by
+// how far they lean, so they keep the authored spacing and width along the whole curve (exact on the
+// centre line, close to it either side). 0 = as before. In between = partly.
+uniform float parabola_keep_spacing : hint_range(0.0, 1.0) = 0.0;
+group_uniforms;
+
+group_uniforms X_Pattern.Spokes;
+// how many spokes around the full circle
+uniform float spoke_count = 24.0;
+// spiral. 0 = straight radial.
+// Spiral amount, not an angle - stays unitless.
+uniform float spoke_twist : hint_range(-4.0, 4.0) = 0.0;
+// Assign a CurveTexture to shape the spokes as they travel outward.
+// Sampled left-to-right from centre to spoke_curve_len.
+uniform sampler2D spoke_curve : hint_default_white, filter_linear;
+// Distance over which the Spoke Curve is applied along each spoke.
+uniform float spoke_curve_len = 2.0;
+group_uniforms;
+
+// TONE PLATE (10 Oct 2026, Orion: three colours -- paper-bag brown with cream
+// highlights). A chiaroscuro woodcut: paper_color is the cream sheet, a second
+// block prints tone_color over almost all of it, and the highlights are gouged
+// out of that block so the cream shows. The ink lines print on top of both.
+// Off = v36 exactly. Anti-moire needs nothing extra: hatching that fades to
+// "paper" lands on the brown, or on the cream where the plate is cut.
+group_uniforms X_Tone_Plate;
+// Tone plate: a second, brown block printed under the lines (chiaroscuro), cut back to paper above Tone Cut Level.
+uniform bool use_tone_plate = false;
+// the second block's colour (paper-bag brown)
+uniform vec3 tone_color : source_color = vec3(0.55, 0.42, 0.29);
+// light level above which the tone block is cut away to cream (the Luminance
+// debug view shows the light level). Above 1 = cut nowhere by light
+uniform float tone_cut_level : hint_range(0.0, 1.5) = 0.85;
+// 0 = a hard gouged edge; higher = a softer change from brown to cream
+uniform float tone_cut_soft : hint_range(0.0, 0.5) = 0.02;
+// cut the whole material to cream regardless of light (1 = skin, faces);
+// in between lowers the cut level by that much
+uniform float tone_cut_material : hint_range(0.0, 1.0) = 0.0;
+// ragged cut edge: how far noise moves the cut level, and the noise size
+// (in pattern units, so it sticks to the surface)
+uniform float tone_edge_noise : hint_range(0.0, 0.5) = 0.08;
+// Size of the noise that roughens the tone plate's cut edge (higher = finer).
+uniform float tone_edge_scale : hint_range(0.01, 20.0) = 1.5;
+// 0 = the ink lines still print over the cream highlights, 1 = none there
+uniform float tone_clear_ink : hint_range(0.0, 1.0) = 0.0;
+// HOW THE CREAM COMES IN (Orion, 10 Oct: the noise edge reads as clumpy snow;
+// the brown-to-ink change works because roughness makes it an even aquatint grain)
+//   Blotch     the noise edge above (tone_edge_noise / tone_edge_scale)
+//   Grain      an even fine speckle, the SAME field as Sea Roughness (its
+//              texture or noise, its POV), so both transitions share one grain
+//   From Lines the cream opens as stripes that run with the hatching; the
+//              grain still roughens their edges
+uniform int tone_cut_mode : hint_enum("Blotch", "Grain", "From Lines") = 0;
+// Grain / From Lines: how far the grain moves the cut (0 = a clean edge)
+uniform float tone_grain_amount : hint_range(0.0, 0.5) = 0.15;
+// Grain size relative to Roughness Scale (1 = the same grain as the brown-to-ink speckle)
+uniform float tone_grain_scale : hint_range(0.1, 8.0) = 1.0;
+// From Lines: off = the cream opens in the middle of the gaps between lines,
+// on = it starts right beside the ink lines and widens away from them
+uniform bool tone_lines_from_ink = false;
+// From Lines: the stripes' own line spacing (they use their own copy of the
+// pattern, taken before anti-moire flattens it). 1 = the ink hatching's spacing,
+// 0.5 = stripes twice as wide (they survive further away). Where they get too
+// fine for the screen (anti-moire's px limits) they turn into the Grain instead
+uniform float tone_line_scale : hint_range(0.1, 4.0) = 1.0;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  LUMINANCE ARM
+// -------------------------------------------------------------
+group_uniforms X_Internal_Light;
+// Always present, never shadowed. This is the floor that keeps
+// hatching alive on objects with no scene light on them.
+uniform vec3  internal_dir       = vec3(0.5, 0.7, 0.5);
+// Strength of the internal fill light (never shadowed): the floor that keeps hatching alive where no scene light reaches. Direction = Internal Dir.
+uniform float internal_intensity : hint_range(0.0, 2.0) = 0.5;
+// AT NIGHT (10 Oct 2026, Orion: the ground never goes fully black at 22:00). The internal light is never shadowed
+// and ignores the time of day, so at night it still lifts the waterline and thin paper slivers survive between
+// every line. This is how much of it is left at full night (1 = unchanged, 0 = gone), following the Sun's energy
+// the same way the night lights do (Night Day Energy in Night_Lights sets what counts as full day).
+uniform float internal_at_night : hint_range(0.0, 1.0) = 1.0;
+// FROM VIEW (11 Oct 2026, Orion: at dawn / dusk, followed from behind, her limbs and clothes went dark). On: Internal
+// Dir is read in the CAMERA's frame instead of the world's (x = screen right, y = screen up, z = toward the camera),
+// a fill from over the viewer's shoulder -- it lights whichever side you are looking at, from any angle, and still
+// models the form. The default (0.5, 0.7, 0.5) = from the upper right, toward the camera. Off = a fixed world direction.
+uniform bool internal_from_view = false;
+group_uniforms;
+
+group_uniforms X_Scene_Light;
+// Multiplier on the engine's real (shadow-casting) lights.
+uniform float scene_intensity : hint_range(-2.0, 3.0) = 1.0;
+// v36. Off (default): a light's energy is ignored, only its angle,
+// distance falloff and shadow count. On: lum is also scaled by the
+// light's energy x colour luminance, as Blender's Shader-to-RGB does,
+// so a Blender scene's watts can be converted instead of hand-tuned.
+uniform bool use_light_energy = false;
+group_uniforms;
+
+group_uniforms X_Map_Range;
+// Map range: luminance In Min..In Max is stretched to Out Min..Out Max. Raising In Min deepens the darks.
+uniform float in_min  : hint_range(0.0, 1.0) = 0.0;
+// Map range: below 1, the lit side reaches full paper sooner (lighter, fewer lines in the light).
+uniform float in_max  : hint_range(0.0, 1.0) = 1.0;
+// Map range: the darkest the luminance can go. Raise it (0.2 - 0.3) to keep the shadow side legible while the light still models the form.
+uniform float out_min : hint_range(-1.0, 2.0) = 0.0;
+// Map range: the brightest the luminance can go. Lower it to keep hairlines in the full light.
+uniform float out_max : hint_range(-1.0, 2.0) = 1.0;
+// Clamp the remapped luminance to 0..1.
+uniform bool  clamp_result = true;
+// LUM CURVE (v36, from the Blender port). A drawn tone curve on the
+// remapped luminance, after Map Range and before ink_bias. Assign a
+// CurveTexture; values outside 0..1 pass through unchanged. The
+// exporter bakes Blender's chosen channel into it.
+uniform bool use_lum_curve = false;
+// repeat_disable matters: with wrapping, lum = 0 blended the curve's
+// two ends and every unlit hair pixel came out 0.47 (30 Sept 2026)
+uniform sampler2D lum_curve : hint_default_white, filter_linear, repeat_disable;
+// final offset - raises or lowers sea level globally
+uniform float ink_bias : hint_range(-1.0, 1.0) = 0.0;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  EXPRESSIONS
+//  A Texture2DArray of normal maps, one expression per layer, each
+//  with its own weight. Works like morph sliders: the DEVIATION
+//  from flat is summed, so several can be held at once and partial
+//  values blend rather than switch.
+//
+//  Build it in Godot: FileSystem -> right-click -> Create New ->
+//  Resource -> Texture2DArray, then drag the layer images in.
+//  Each layer must use the SAME UV layout as the head.
+//
+//  Every weight at 0 gives the neutral face. Animate the weights
+//  with AnimationPlayer property tracks, or drive them from script
+//  with set_shader_parameter.
+// -------------------------------------------------------------
+// -------------------------------------------------------------
+//  ALPHA CUTOUT
+//  For leaf cards, cut paper, torn playbills - anything whose
+//  shape lives in a texture rather than in geometry.
+//
+//  Uses ALPHA_SCISSOR_THRESHOLD, which DISCARDS below the cut
+//  rather than blending. That keeps the material in the opaque
+//  pass, so it sorts correctly, writes depth, and casts a real
+//  cut-out shadow - which is what gives dappled light through
+//  leaves. Blended transparency would do none of those.
+//
+//  Discard happens in fragment(), before light() runs, so cut
+//  pixels cost nothing and the hatching is unaffected.
+//
+//  REQUIRES UVs. Two-sided cards also need cull_disabled - see the
+//  note in the NOTES block at the end of this file.
+// -------------------------------------------------------------
+group_uniforms Alpha_Cutout;
+// Alpha cutout: discard pixels below Alpha Threshold (leaf cards, cut paper). Needs UVs.
+uniform bool use_alpha_cutout = false;
+// The cutout mask texture.
+uniform sampler2D alpha_tex : hint_default_white, filter_linear;
+// Read the texture's ALPHA channel, or its RED channel if the mask
+// arrived as a separate greyscale image.
+uniform bool alpha_from_red = false;
+// Below this the pixel is discarded. 0.5 is the usual starting
+// point; raise it to eat soft edges, lower it to keep more.
+uniform float alpha_threshold : hint_range(0.0, 1.0) = 0.5;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  DISTANCE GAUGE
+//  Keeps on-screen line density roughly constant as an object
+//  recedes, WITHOUT moving the pattern into screen space.
+//
+//  The problem: object-space lines are fixed in object units, so a
+//  receding figure's lines crowd together on screen and the marks
+//  stop reading as a printed gauge. Screen space fixes that but
+//  swims, because the object slides through a stationary field.
+//
+//  The fix: keep the coordinate in object space - nothing swims -
+//  and scale only the FREQUENCY by distance.
+//
+//  Steps are powers of two on purpose. Doubling a sine frequency
+//  preserves every existing zero crossing, so lines do not slide as
+//  the gauge changes: the existing lines stay exactly where they
+//  are and new ones appear between them. A continuous scale would
+//  make the whole field crawl along the surface as the figure moves
+//  in depth.
+//
+//  This is also the mechanism for a three-tier LOD - each distance
+//  band simply gets a coarser tool, which is what an engraver does.
+// -------------------------------------------------------------
+// -------------------------------------------------------------
+//  ANTI-MOIRE: LINE FADE (Solid)  - ported from Blender, 9 Oct 2026
+//  Where a line period is only a few SCREEN PIXELS wide (far away, or a
+//  wall seen at a grazing angle) the lines beat against the pixel grid
+//  and make moire. Here the pattern collapses toward fade_level instead,
+//  so step() stays a step: dense hatching merges into solid ink in the
+//  darks and drops out to paper in the lights - what a plank-cut print
+//  does when the cuts get too close. Measured per pixel with screen
+//  derivatives, so no render-size / camera inputs are needed (Blender's
+//  version had to drive them in). OFF = unchanged.
+// -------------------------------------------------------------
+group_uniforms Anti_Moire.Anti_Moire;
+// (the on/off switch, use_anti_moire, lives in the Enable group with the others)
+// a line period this many pixels or less is fully faded
+uniform float fade_px_min : hint_range(0.5, 20.0) = 2.0;
+// this many pixels or more is fully lines; blend in between
+uniform float fade_px_max : hint_range(0.5, 40.0) = 4.0;
+// what the pattern collapses to: 0 = faded hatching drops to paper,
+// 1 = merges into ink, 0.5 = ink where the surface is in shadow,
+// paper where it is lit
+uniform float fade_level : hint_range(0.0, 1.0) = 0.5;
+// SMOOTH MEASURE (10 Oct 2026): measure the line spacing on the smoothed surface instead of the
+// flat triangles, so a faceted mesh (the 2 m terrain grid) stops fading square by square.
+// Off = the per-triangle measure, as before
+uniform bool anti_moire_smooth = false;
+// SCUMBLE + BURNISH (10 Oct 2026, Orion: they shimmer like TV static in motion). Their cuts and grit are a fixed
+// size, so far away they fall below a pixel. On, they fade -- with the same Fade Px Min / Max -- to their AVERAGE:
+// scumble to the share of ink its cuts remove, burnish to the share its grit removes, as an even tone. Same
+// brightness, no shimmer. Needs Use Anti Moire.
+uniform bool anti_moire_extras = false;
+// COARSER LINES (10 Oct 2026, Orion: the fade travels with the player like an aura -- it lays hatching
+// onto bare ground, or carries a lamp into the dark). On: before fading, far lines double their spacing,
+// level by level -- every other line thins away and the kept ones widen, as an engraver cuts fewer,
+// bolder lines in the distance. The tone stays the same, so the change has no edge. Still pinned to the
+// object. The fade (Px Min / Max) only acts once Levels run out. Off = unchanged.
+uniform bool anti_moire_coarsen = false;
+// keep the lines at least this many pixels apart (keep it above Fade Px Max, or the fade starts first)
+uniform float coarsen_px : hint_range(2.0, 60.0) = 12.0;
+// how many doublings before the fade takes over (4 = up to 16x the authored spacing)
+uniform int coarsen_levels : hint_range(1, 6) = 4;
+// COARSEN PLATE STEP (12 Oct 2026, Orion: less obvious line movement on screen as the character walks; named after
+// Plate Step, which it works like). The level used to follow the camera every frame, so the bands where lines thin
+// swept over the ground as she walked. On: the levels are worked out from HELD camera positions that
+// district1_setup.gd only moves every Plate Step Distance metres (or on the stop-motion beat) -- in between the lines
+// stay still on the ground, then re-lay.
+uniform bool coarsen_plate_step = false;
+// STAGGER: each level of spacing uses its own held position (four of them, moved at staggered times), so the near
+// band and the far band re-lay at different moments instead of all at once. Off = one position for every level.
+uniform bool coarsen_plate_stagger = true;
+// CROSSFADE (12 Oct 2026, Orion: "the lines could go to paper a bit before the transition and then fade in after",
+// "or a choice between crossfade to paper or crossfade to ink"): the lines a re-lay will change fade out as the camera
+// nears it, switch while faded, then fade back in at their new spacing. Only those lines take part. How far / how
+// long: Coarsen Plate Fade on District 1 (import) (0 = no crossfade). What they fade to: Paper, Ink, or Flat Tone
+// (the Fade Level tone: neither a paper flash in deep shadow nor an ink flash in full light).
+uniform int coarsen_plate_fade_to : hint_enum("Paper", "Ink", "Flat Tone") = 0;
+// RAGGED: each patch of ground changes level at a slightly different distance (a noise pinned to the world), so the
+// change reads as a broken edge, not a clean moving front. In levels (0 = off, 1 = up to a whole level either way)
+uniform float coarsen_ragged : hint_range(0.0, 1.5) = 0.0;
+// the size of the ragged patches, in metres (bigger = larger patches)
+uniform float coarsen_ragged_size : hint_range(0.2, 30.0) = 4.0;
+// SNAP: change level outright instead of thinning every other line gradually (fewer moments of change, each a pop)
+uniform bool coarsen_snap = false;
+// EDGE ANTI-ALIAS (9 Oct 2026, use_edge_aa in Enable): the ink/paper edge of the main
+// lines is softened over this many screen pixels instead of a hard step, so 1-2 px paper
+// slivers between dark lines stop flickering in and out of pixels (scallop moire). The
+// edge pixels blend ink and paper; everything else stays pure. 1 = one pixel.
+uniform float edge_aa_width : hint_range(0.25, 3.0) = 1.0;
+group_uniforms;
+
+group_uniforms Anti_Moire.Distance_Gauge;
+// Distance gauge: the lines double / halve in steps with distance, so their spacing on screen stays roughly even.
+uniform bool use_distance_gauge = false;
+// Distance at which wave_scale is used exactly as authored.
+// Set it to your normal working distance from the subject.
+uniform float gauge_ref_dist : hint_range(0.5, 200.0) = 10.0;
+group_uniforms;
+
+// FAR RESOLVE (11 Oct 2026, Orion: legibility -- far down the street the line work should settle: by day always to
+// no lines, at night always to solid dark). Level ground beyond Far Start fades to a flat tone by Far End: paper by
+// day, ink by night, following the clock's night (Internal Light Hours in district1_setup.gd; in the editor, the
+// Sun's energy). Only the Sun's pass, so the lantern and the night-light pools still print over it. Off = unchanged.
+group_uniforms Anti_Moire.Far_Resolve;
+// Far Resolve: far ground settles to paper by day, ink by night (settings below).
+uniform bool use_far_resolve = false;
+// metres from the camera where the fade starts, and where it is complete
+uniform float far_start : hint_range(0.0, 300.0) = 25.0;
+uniform float far_end : hint_range(1.0, 400.0) = 60.0;
+// how far it goes (1 = all the way to the flat tone)
+uniform float far_strength : hint_range(0.0, 1.0) = 1.0;
+// the tone it settles to by day and by night (waterline units: above ~1 = clean paper, below 0 = solid ink)
+uniform float far_day_tone : hint_range(-0.5, 1.5) = 1.2;
+uniform float far_night_tone : hint_range(-0.5, 1.5) = -0.2;
+// only level ground (streets, squares); off = walls and roofs too
+uniform bool far_ground_only = true;
+// Far ground in SHADE keeps its shade (1) instead of resolving to the day tone -- no white street far ahead at dusk
+// rolling into darkness as you walk (12 Oct 2026). 0 = everything far resolves, as before.
+uniform float far_keep_shadows : hint_range(0.0, 1.0) = 0.0;
+group_uniforms;
+
+group_uniforms Cross_Hatch;
+// Cross-hatching can be a different SHAPE from the main arm, not
+// just a different angle. Straight rain over curved cloud is the
+// classic sky pairing.
+uniform int cross_type : hint_enum("Lines,Sinusoid,Parabolic,Rings,Spokes") = 0;
+// Cross-hatch line density (like Wave Scale).
+uniform float cross_scale      = 40.0;
+// Cross-hatching only appears where luminance falls below this.
+// Set to 1.0 to run it EVERYWHERE - which is what a sky wants,
+// where both mark systems are continuous across the whole field.
+uniform float cross_threshold  : hint_range(0.0, 1.0) = 0.35;
+// Cross-hatch line angle, in degrees.
+uniform float cross_angle      : hint_range(-180.0, 180.0) = 90.0;
+
+// --- the cross arm's OWN tonal controls -----------------------
+// cross_threshold is a binary GATE, not a levels control: it turns
+// the arm on below a luminance and off above it, with nothing in
+// between. Set it to 1.0 to run the arm everywhere, then shape its
+// density with the levels below.
+// These run on top of the main map range, so glare, roughness and
+// the main gradient all carry through before they apply.
+uniform float cross_in_min  : hint_range(0.0, 1.0) = 0.0;
+// Cross-hatch map range: luminance In Min..In Max is stretched to Out Min..Out Max to set where its lines appear.
+uniform float cross_in_max  : hint_range(0.0, 1.0) = 1.0;
+// Cross-hatch map range: the low end of the remapped luminance.
+uniform float cross_out_min : hint_range(-1.0, 2.0) = 0.0;
+// Cross-hatch map range: the high end of the remapped luminance.
+uniform float cross_out_max : hint_range(-1.0, 2.0) = 1.0;
+// Clamp the cross-hatch's remapped luminance to 0..1.
+uniform bool  cross_clamp = true;
+// shifts the cross arm's sea level without touching the main arm
+uniform float cross_bias : hint_range(-1.0, 1.0) = 0.0;
+
+// its own screen-space ramp, independent of the main one
+uniform sampler2D cross_grad_tex : hint_default_white, filter_linear;
+// Strength of a screen gradient (Cross Grad Tex) that shifts where the cross-hatch appears.
+uniform float cross_grad_amount : hint_range(-2.0, 2.0) = 0.0;
+// The cross gradient runs left-right (on) or top-bottom (off).
+uniform bool cross_grad_horizontal = false;
+group_uniforms;
+
+// DAY WALL FLOOR (11 Oct 2026, Orion's legibility chart, idea 1: during the day the shadows on the sides of the
+// buildings don't get as dark -- without touching the ink colour). By day, on upright faces, the shade below Day Wall
+// Knee is squeezed into the band Day Wall Floor .. Knee: the darkest shade lands on the floor, the shading inside the
+// shadow keeps its steps, and nothing above the knee changes. So a shaded wall prints open hatching instead of solid
+// ink. Fades out by the clock's night (Internal Light Hours in district1_setup.gd; in the editor, the Sun's energy).
+// Roofs, ground and the characters' level parts are left alone (Wall Steepness). Sun's pass only. Off = unchanged.
+group_uniforms Day_Wall_Lighting_Minimum;
+// Day Wall Floor: shaded walls never go fully dark by day (settings below).
+uniform bool use_day_wall_floor = false;
+// the darkest a wall may print by day (waterline units: ~0.3 open hatching, ~0.5 light hatching)
+uniform float day_wall_floor : hint_range(0.0, 1.0) = 0.3;
+// shade darker than this is squeezed up into Floor .. Knee; lighter shade is untouched (keep it above Floor)
+uniform float day_wall_knee : hint_range(0.0, 1.2) = 0.55;
+// how upright a face must be to count as a wall (0 = only sheer walls, 1 = roofs too)
+uniform float day_wall_steepness : hint_range(0.0, 1.0) = 0.35;
+// how much of the floor still applies at full night (0 = walls go fully dark at night, as now)
+uniform float day_wall_at_night : hint_range(0.0, 1.0) = 0.0;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  EVENING WALLS (12 Oct 2026, Orion: between 4 and 6:30 pm the moving street shadows are gone; the buildings carry
+//  the change instead). Both work on the walls and roofs only (not level ground), in the sun's pass, by height above
+//  the street right below (district1_setup.gd measures the street when the game starts). Put their heights on the
+//  Evening Schedule to make them move.
+//  INK RISE   below Ink Rise Height the walls sink into ink -- the ink climbing up from the street.
+//  LAST LIGHT above Last Light Height the walls are lifted toward paper -- the last sun on the upper floors and roofs.
+// -------------------------------------------------------------
+group_uniforms Evening_Walls;
+uniform bool use_ink_rise = false;
+// Metres above the street: the walls below this sink into ink. Raise it through the evening.
+uniform float ink_rise_height : hint_range(0.0, 30.0) = 0.0;
+// How soft the ink's top edge is, metres (the softening runs DOWN from the height, never above it).
+uniform float ink_rise_soft : hint_range(0.0, 5.0) = 0.6;
+// How much darker below the line (1 = a full step of light).
+uniform float ink_rise_strength : hint_range(0.0, 2.0) = 1.0;
+// How much the ink's top edge wanders up and down along the street, metres.
+uniform float ink_rise_waver : hint_range(0.0, 3.0) = 0.4;
+// How quickly it wanders (waves per metre along the street).
+uniform float ink_rise_waver_scale : hint_range(0.02, 2.0) = 0.3;
+// ABOVE THE INK (13 Oct 2026, Orion: "first it just intensifies the darkness of the dark pattern lines ... we can still see
+// some of the in-between stripes of paper"): a band this many metres ABOVE Ink Rise Height where the line work darkens
+// partway (lines thicken, paper stripes stay), fading out upward. 0 = off. Put it on the schedule (e.g. from 18:30).
+uniform float ink_rise_above : hint_range(0.0, 15.0) = 0.0;
+// How much the lines darken just above the ink line (0.2-0.4 = thicker lines, stripes still show; 1 = toward solid).
+uniform float ink_rise_above_amount : hint_range(0.0, 1.0) = 0.3;
+uniform bool use_last_light = false;
+// Metres above the street: the walls above this are lifted toward paper. Raise it as the sun sets; past the roofs = gone.
+uniform float last_light_height : hint_range(0.0, 40.0) = 8.0;
+// How soft its edge is, metres either side of the height. Height 0 = the whole wall lifted; Lift 0 = off.
+uniform float last_light_soft : hint_range(0.0, 5.0) = 0.8;
+// How much lighter above the line.
+uniform float last_light_lift : hint_range(0.0, 2.0) = 0.6;
+// How much its edge wanders, metres (same wander pattern as the ink's, so they move together).
+uniform float last_light_waver : hint_range(0.0, 3.0) = 0.3;
+group_uniforms;
+group_uniforms Expressions;
+// Expressions: a Texture2DArray of normal maps, one expression per layer (same UV layout as the head).
+uniform sampler2DArray expression_tex;
+// Weight of expression layer 0 (morph-slider style; several can be held at once).
+uniform float expr_0 : hint_range(-1.0, 2.0) = 0.0;
+// Weight of expression layer 1.
+uniform float expr_1 : hint_range(-1.0, 2.0) = 0.0;
+// Weight of expression layer 2.
+uniform float expr_2 : hint_range(-1.0, 2.0) = 0.0;
+// Weight of expression layer 3.
+uniform float expr_3 : hint_range(-1.0, 2.0) = 0.0;
+// Weight of expression layer 4.
+uniform float expr_4 : hint_range(-1.0, 2.0) = 0.0;
+// Weight of expression layer 5.
+uniform float expr_5 : hint_range(-1.0, 2.0) = 0.0;
+// Use the expression normal maps (Expression Tex + weights).
+uniform bool use_expressions = false;
+group_uniforms;
+
+// BIAS LID (formerly Eyelid; renamed 2 Oct 2026) (v36, Orion 1 Oct 2026; simplified the same day: "we don't want to
+// add any fancy stuff to this yet"). An exaggerated lid shadow over the
+// eyeball that comes down from the side the light is on, and only ever
+// DARKENS -- the eye stays visible.
+//   Lid Close     how far the lid comes down: 0 = open, 0.5 = halfway down
+//                 the eyeball (its leading edge is a line of latitude round
+//                 the light direction, like the equator), 1 = closed.
+//   Lid Darkness  how much darker the eye prints under the lid.
+//   Lid Softness  how blurry the lid's edge is.
+//   The light direction is automatic: joan_setup.gd writes the key light
+//   (its lid_light_node) into lid_light every frame; until it does
+//   (lid_light.w < 0) each scene light is used directly.
+//   Bias Lid Auto: the eyeball (centre / radius) in the part's own frame, the
+//   same eyeball for every part of an eye so the edge lines up. Leave it.
+group_uniforms Eyes.Bias_Lid;
+// Bias Lid: an exaggerated eyelid shadow on an eyeball, from the side the light is on; it only ever darkens.
+uniform bool  use_lid = false;
+// How far the lid comes down: 0 = open, 0.5 = halfway down the eyeball, 1 = closed.
+uniform float lid_close : hint_range(0.0, 1.0) = 0.45;
+// How much darker the eye prints under the lid.
+uniform float lid_darkness : hint_range(0.0, 1.0) = 0.5;
+// How blurry the lid's edge is.
+uniform float lid_softness : hint_range(0.0, 1.0) = 0.2;
+// AFFECT LEFT / RIGHT (Orion, 2 Oct 2026): when one eye is already in shadow it
+// needs less lid than the other. 0 = both eyes equally; slide LEFT (toward -1)
+// and the character's RIGHT eye fades out until only the LEFT eye has the lid;
+// slide RIGHT (toward +1) for the opposite. The character's own left/right.
+// Each eye mesh is told its side by joan_setup.gd (instance uniform lid_side).
+uniform float lid_affect_left_right : hint_range(-1.0, 1.0) = 0.0;
+// GRAIN (Orion, 1 Oct 2026: "lid softness ... as a spotty noise, the same
+// kind of noise as burnish"). Across the softness band each tiny cell is on
+// or off against the lid's strength there, like burnish grit: more cells go
+// dark deeper under the lid. 0 = the smooth edge, 1 = fully speckled.
+uniform float lid_grain : hint_range(0.0, 1.0) = 0.0;
+// speck size: cells per eyeball radius (higher = finer specks)
+uniform float lid_grain_scale : hint_range(1.0, 400.0) = 60.0;
+// LID LIGHT CURVE (Orion, 1 Oct 2026): shapes the light on the OPEN part of
+// the eye, e.g. a linear rise out of the shadow and a bright gleam just above
+// the lower eyelid. The curve runs left->right from the BOTTOM of the eyeball
+// to the TOP (along the light direction, the axis the lid travels on), and
+// its height is the extra brightness added there. Tied to height on the
+// eyeball, not to the shadow's edge, so a gleam stays put as Lid Close moves;
+// under the lid it is masked off. Assign a CurveTexture to Lid Light Curve;
+// Lid Curve Exposure scales it (0 = off). Renamed from lid_light_strength 4 Oct 2026.
+uniform sampler2D lid_light_curve : hint_default_black, filter_linear, repeat_disable;
+// Strength of the Lid Light Curve (extra light on the open part of the eye; 0 = off).
+uniform float lid_curve_exposure : hint_range(0.0, 2.0) = 0.0;
+// CORNEA CUT (Orion, 1 Oct 2026): the engraver's trick for an iris behind a
+// clear wet cornea -- thin PAPER cuts that interrupt the pattern lines just
+// above the lower lid, scumble-style. It imitates the WET REFLECTION, so it
+// does NOT follow the light: its height axis is the eyeball's own up/down
+// (fixed to the head; Cornea Height debug view), 0 = bottom, 1 = top.
+uniform bool  use_cornea_cut = false;
+// SIMPLE CUTS (Use Cornea Curve off): Count lines spread over Band round Height
+uniform float cornea_cut_height : hint_range(0.0, 1.0) = 0.42;
+// Simple cuts: how many cuts (1 - 3), spread over Band round Height.
+uniform int   cornea_cut_count : hint_range(1, 3) = 2;
+// how far apart the cuts spread (in Cornea Height units)
+uniform float cornea_cut_band : hint_range(0.0, 0.2) = 0.03;
+// thickness of each cut (in Cornea Height units)
+uniform float cornea_cut_width : hint_range(0.0, 0.05) = 0.006;
+// DRAWN CUTS (Use Cornea Curve on): draw them. Left->right = Cornea Height;
+// a spike IS a cut -- where it is sets the height, its width the thickness,
+// its height how solid it prints (with Break, low spikes print as dashes).
+uniform bool  use_cornea_curve = false;
+// Drawn cuts: a curve where each spike is a cut (left-right = Cornea Height; width = thickness; height = how solid).
+uniform sampler2D cornea_cut_curve : hint_default_black, filter_linear, repeat_disable;
+// 0 = solid cuts; higher = they break into dashes, like a hand-cut scumble
+uniform float cornea_cut_break : hint_range(0.0, 1.0) = 0.3;
+// Size of the breaks that turn the cuts into dashes.
+uniform float cornea_cut_break_scale : hint_range(1.0, 200.0) = 30.0;
+// GLEAM WEDGE (Orion, 1 Oct 2026): the engraver's wedge -- ONE paper stroke
+// that is WIDE at its head (the gleam) and narrows EXPONENTIALLY into a thin
+// white tail running along a set height just above the lower lid, cutting
+// into the pattern line beside it. Works on any eye part (sclera or iris).
+// Same eye-fixed axes as the cornea cut (does not tilt with the light):
+// height = Cornea Height (0 bottom .. 1 top), across = the eye's own left/right
+// in eyeball radii (-1 .. 1, 0 = the middle).
+uniform bool  use_gleam_wedge = false;
+// Gleam wedge: the height on the eye (Cornea Height, 0 bottom .. 1 top) its tail runs along.
+uniform float wedge_height : hint_range(0.0, 1.0) = 0.33;
+// where the wide head sits across the eye (-1 .. 1)
+uniform float wedge_start : hint_range(-1.0, 1.0) = 0.0;
+// which way the tail runs from the head
+uniform int   wedge_direction : hint_enum("Toward +X", "Toward -X") = 0;
+// head width, in Cornea Height units
+uniform float wedge_width : hint_range(0.0, 0.2) = 0.04;
+// how fast it narrows (higher = shorter tail)
+uniform float wedge_taper : hint_range(0.1, 40.0) = 6.0;
+// CUT CURVE (Orion, 1 Oct 2026): bends the cornea cuts AND the gleam wedge so
+// they follow the eyeball's surface, like latitude lines on the Bias Lid's
+// sphere seen with its pole tipped toward / away from you. 0 = straight;
+// + and - bow them opposite ways (smile / frown). A few degrees is plenty.
+uniform float cut_curve : hint_range(-45.0, 45.0) = 0.0;
+group_uniforms;
+
+group_uniforms Eyes.Bias_Lid_Auto;
+// Automatic (exporter): the eyeball's centre in the part's own frame. Leave it.
+uniform vec3  lid_center = vec3(0.0);
+// Automatic (exporter): the eyeball's radius. Leave it.
+uniform float lid_radius = 1.0;
+// Automatic: the key light's direction, written every frame by joan_setup.gd (w < 0 = use each scene light). Leave it.
+uniform vec4  lid_light = vec4(0.0, 0.0, 0.0, -1.0);
+group_uniforms;
+
+// BIAS LOBE (v36, from the Blender port). An ink bias that peaks in
+// one direction from the pattern centre and fades round to the far
+// side:  lum += amount * max(0, dot(P/|P|, D)) ^ (1/spread^2).
+// P is the model position in the obj_axis plane (x object_scale_comp)
+// less pattern_center, with the third axis as Blender's (-Z for the
+// XY pair, which is Blender's XZ). D from azimuth (in the plane) and
+// elevation (toward the third axis). Reach fades it out beyond a
+// radius, hollow fades it in from the centre (0 = off for both).
+group_uniforms Eyes.Bias_Lobe;
+// Bias lobe: an ink bias that peaks in one direction from the pattern centre and fades round to the far side.
+uniform bool  use_bias_lobe = false;
+// Bias lobe strength: + lightens (fewer lines), - darkens, at the peak.
+uniform float bias_amount : hint_range(-1.0, 1.0) = 0.3;
+// Bias lobe direction in the projection plane, degrees.
+uniform float bias_azimuth : hint_range(-180.0, 180.0) = -90.0;
+// Bias lobe direction toward the third axis, degrees.
+uniform float bias_elevation : hint_range(-90.0, 90.0) = 0.0;
+// How wide the lobe is (1 = a broad half; lower = a tight beam).
+uniform float bias_spread : hint_range(0.05, 1.0) = 1.0;
+// Fades the lobe out beyond this radius from the pattern centre (0 = no limit).
+uniform float bias_reach : hint_range(0.0, 10.0) = 0.0;
+// Fades the lobe in from the centre over this radius (0 = off).
+uniform float bias_hollow : hint_range(0.0, 10.0) = 0.0;
+group_uniforms;
+
+// FOOT SHADOW (11 Oct 2026, Orion: the player character needs a guaranteed small shadow right under the feet on the
+// ground, whatever the sun is doing). A soft round patch of ink on level ground under where she stands -- at noon,
+// at night under the lantern, in a building's shade. Her position comes from district1_setup.gd every frame (run
+// time only, like Keep Hero Shadow). Put it on the ground's material. Off = unchanged.
+group_uniforms Foot_Shadow;
+// Foot Shadow: a small guaranteed shadow under her feet (settings below).
+uniform bool use_foot_shadow = false;
+// its radius in metres (about her stance: 0.3 - 0.45)
+uniform float foot_shadow_radius : hint_range(0.05, 1.5) = 0.35;
+// how dark (light taken off, waterline units: 0.5 = dense lines, 1 = solid ink)
+uniform float foot_shadow_strength : hint_range(0.0, 1.5) = 0.7;
+// how soft its edge is (0 = a hard disc, 1 = fading from the middle)
+uniform float foot_shadow_soft : hint_range(0.0, 1.0) = 0.5;
+// OFF WHEN CARRYING LAMP (12 Oct 2026, Orion: the lamp casts shadows of its own and fights the foot shadow): no foot
+// shadow while she holds the lantern with its shutter open. It comes back when she sets it down or shuts it.
+// (district1_setup.gd tells the shader every frame; run time only.)
+uniform bool foot_shadow_off_when_carrying_lamp = true;
+// When she stands out of the sun (medium shade, the street in tone plate), the foot shadow prints as solid ink. In sun it
+// stays the soft darkening (14 Oct 2026).
+uniform bool foot_shadow_ink_in_shade = true;
+// ... half the width of that foot-shaped shadow, metres (its length runs heel to toe).
+uniform float foot_shadow_shade_size : hint_range(0.01, 0.2) = 0.05;
+// LIFT SPREAD (16 Oct 2026, Orion: in shade with no lamp a lifted foot needs "something to connect ... to the terrain when foot
+// lifted"): the foot-shaped ink widens as the foot rises -- x(1 + Spread) at Lift Full metres up -- so a dark patch always
+// sits on the street beneath it, and narrows back as it lands. 0 = the shoe-sized shape as before. In shade only.
+uniform float foot_shadow_lift_spread : hint_range(0.0, 3.0) = 1.0;
+uniform float foot_shadow_lift_full : hint_range(0.02, 0.6) = 0.25;
+// SOFT EDGE + LIFT FADE (16 Oct 2026, Orion: "can foot shadow have a soft edge or fall off? ... intensity decrease with the
+// height away from the ground"): Shade Soft = how much of the shape's half-width fades out at its rim (0 = hard edge as
+// before, 1 = fades all the way from the middle); Lift Fade = how much lighter it is at Lift Full up (0 = as dark as on
+// the ground, 1 = gone).
+// (16 Oct 2026, Orion: "both intensity and hardness should increase as the foot gets closer to the ground") Shade Soft is
+// the softness at Lift Full; Shade Soft Ground the softness with the foot down -- in between it follows the height.
+uniform float foot_shadow_shade_soft : hint_range(0.0, 1.0) = 0.8;
+uniform float foot_shadow_shade_soft_ground : hint_range(0.0, 1.0) = 0.1;
+// TRAIL (16 Oct 2026, Orion: the jog needs a mark tying a lifted foot to the street -- "along the foot's path"): a tapered
+// ink stroke on the street from where the foot left it to under the foot, faint and thin at the takeoff, darker at the
+// foot, fading after it lands (district1_setup.gd sends hero_trail_l / _r). Strength 0 = off. In shade only, like the rest.
+uniform float foot_shadow_trail : hint_range(0.0, 1.0) = 0.8;
+uniform float foot_shadow_trail_width : hint_range(0.1, 2.0) = 0.7;      // x the foot shadow's half-width, at the foot end
+uniform float foot_shadow_trail_length : hint_range(0.05, 2.0) = 0.4;   // metres: only the last of the path, behind the foot
+uniform vec4 hero_trail_l = vec4(0.0, -100000.0, 0.0, 0.0);
+uniform vec4 hero_trail_r = vec4(0.0, -100000.0, 0.0, 0.0);
+// BODY SHADOW (16 Oct 2026, Orion: "a faint body shadow that wobbles a little bit but doesn't actually go anywhere ... maybe
+// 15% intensity"): a soft oval pool of tone under her, longer along the way she faces, its outline wavering slowly. No
+// direction, no length. In shade only, under the foot shadows. Strength 0 = off.
+uniform float foot_shadow_body : hint_range(0.0, 1.0) = 0.25;
+uniform float foot_shadow_body_size : hint_range(0.1, 1.5) = 0.38;      // metres across; 1.3x that front to back
+uniform float foot_shadow_body_soft : hint_range(0.05, 1.0) = 0.6;       // share of the radius that fades out
+uniform float foot_shadow_body_wobble : hint_range(0.0, 0.5) = 0.12;     // how much the outline wavers
+uniform float foot_shadow_body_wobble_speed : hint_range(0.0, 4.0) = 0.8;
+uniform float foot_shadow_lift_fade : hint_range(0.0, 1.0) = 0.6;
+// CONTACT (16 Oct 2026, Orion: "drop the intensity of the foot shadow by 40% - it should rapidly increase in intensity within
+// those last two inches or so before the foot hits the ground"): once the foot is Contact metres up the shadow is at Lift
+// Strength; it jumps to full ink only in those last centimetres. (Lift Fade then lightens it further, higher up.)
+uniform float foot_shadow_lift_strength : hint_range(0.0, 1.0) = 0.6;
+uniform float foot_shadow_contact : hint_range(0.005, 0.2) = 0.05;
+// A solid round ink DOT under each foot, this radius in metres while the foot is planted (0 = none) -- a clean round
+// mark under her instead of a few squiggles (12 Oct 2026). Shrinks as the foot lifts.
+uniform float foot_shadow_dot : hint_range(0.0, 0.5) = 0.0;
+// How high the foot lifts (metres above Dot Planted) before its dot is gone.
+uniform float foot_shadow_dot_lift : hint_range(0.01, 0.6) = 0.2;
+// How high the foot's point sits above the ground when it is planted (the ankle / ball of the foot), metres.
+uniform float foot_shadow_dot_planted : hint_range(0.0, 0.3) = 0.08;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  GLARE  -  a radiating layer that ADDS luminance
+// -------------------------------------------------------------
+//  Composited on top of whatever the main pattern is. Because it
+//  raises luminance before the threshold, ink thins where the glare
+//  falls - so it reads as a light source rather than as more ink.
+// -------------------------------------------------------------
+group_uniforms Glare;
+// 0 = off. Around 0.2 is the useful starting point.
+uniform float glare_boost : hint_range(0.0, 1.0) = 0.0;
+// The shape of the glare rays.
+uniform int glare_type : hint_enum("Spokes,Glare") = 1;
+// Where the glare rays come from, in the pattern's coordinates.
+uniform vec2 glare_center = vec2(0.0, 0.0);
+// How many glare rays.
+uniform float glare_count = 12.0;
+// how far the rays reach before vanishing
+uniform float glare_len = 1.5;
+// higher = rays come to a sharper point
+uniform float glare_sharp : hint_range(0.5, 8.0) = 2.0;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  CLUMP
+//  Closes nearby strands into a lock.
+//
+//  This matters more here than it would in a shaded renderer. Two
+//  strands that nearly coincide under a threshold do not blend to a
+//  mid value - they either both land on the ink side and become one
+//  solid shape, or they alternate and read as noise. Clumping is
+//  what turns hair from stipple into carved locks.
+//
+//  WATCH FOR THE FLAT-MASS FAILURE ARRIVING ONE LEVEL UP. Strands in
+//  a lock end up near-parallel, return the same dot(NORMAL, LIGHT),
+//  and the whole lock thresholds at once - exactly the problem v24
+//  added root_normal_blend to solve at strand scale. The cure is the
+//  same in spirit: variation between guides, so neighbouring locks
+//  catch light differently. The bake's clump_jitter_degrees is that
+//  dial.
+//  Without it you trade fuzz for flat paddles.
+// -------------------------------------------------------------
+group_uniforms Hair.Clump;
+// Degrees of turn toward the guide over the strand's length.
+// NEGATIVE steers away, which is unclump - frizz, flyaways, opening
+// a mass that has closed too hard.
+instance uniform float clump_amount : hint_range(-180.0, 180.0, 0.5) = 0.0;
+// Distribution of the turn. Above 1 keeps the roots scattered and
+// closes the lock toward the tip, which is what hair does - roots
+// have to stay spread or the scalp shows through.
+instance uniform float clump_falloff : hint_range(0.2, 6.0, 0.01) = 2.0;
+// PROFILE. Assign a CurveTexture and it replaces the falloff's shape
+// with the one you draw, sampled root to tip. 0.5 is neutral, above
+// clumps, BELOW SPLAYS - so a single curve can spread the roots,
+// close the middle and open the tip again, which no power function
+// can do because it cannot change sign.
+// Per material, not per node: samplers cannot be instance uniforms.
+uniform sampler2D clump_profile : hint_default_white, filter_linear;
+// Clump the strips toward each other along their length by the clump profile curve.
+uniform bool use_clump_profile = false;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  HEAD COLLIDE
+//  Stops a bending strand entering the skull.
+//
+//  Two ways to describe the head, usable together.
+//
+//  SCALP SPHERE is the one dial version. The strand's root sits at
+//  the local origin and COLOR.rgb carries the scalp normal, so a
+//  sphere tangent to the scalp at the root is fully determined by a
+//  single radius - no coordinates to plumb, and it follows the
+//  character anywhere because it is defined relative to the strand
+//  rather than to the world. It describes the cranium well and the
+//  jaw and nape badly, because a sphere fitted at the root stops
+//  resembling the head once a strand travels far from it.
+//
+//  HEAD SPHERES are explicit, in world space, for the places the
+//  scalp sphere gets wrong: the jaw-to-neck junction, the nape,
+//  behind the ear. Set them from the controller. If the head is
+//  animated, update them each frame from the bone - they are plain
+//  uniforms on a material shared by every hair node, which is
+//  correct while one head is wearing the hair, and wrong the moment
+//  two characters share the material file.
+//
+//  These are plain uniforms and not instance uniforms on purpose:
+//  v31 already spends twelve of Godot's sixteen instance uniform
+//  slots, and a collider belongs to the head rather than to a zone.
+// -------------------------------------------------------------
+group_uniforms Hair.Head_Collide;
+// Keep bent strips outside the head spheres.
+uniform bool use_head_collide = false;
+// Radius of the sphere tangent to the scalp at each strand's root,
+// in WORLD metres. 0 disables it. Start near the radius of the
+// skull at the crown - too small and strands sink through, too
+// large and long strands stand off the head.
+uniform float scalp_sphere_radius : hint_range(0.0, 1.0, 0.001) = 0.0;
+// xyz = centre in WORLD space, w = radius. w of 0 disables one.
+uniform vec4 head_sphere_1 = vec4(0.0);
+// Another head sphere the strips are kept outside of: xyz = centre, w = radius (0 = off).
+uniform vec4 head_sphere_2 = vec4(0.0);
+// Another head sphere the strips are kept outside of: xyz = centre, w = radius (0 = off).
+uniform vec4 head_sphere_3 = vec4(0.0);
+// Clearance in world metres, on top of the strand's own half width,
+// which is accounted for separately. Applied to the explicit
+// spheres only - see the note where it is built.
+uniform float collide_margin : hint_range(0.0, 0.05, 0.0005) = 0.002;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  ROOT NORMAL BLEND
+//  Bends the shading normal toward the surface the strand grew
+//  from, without touching the geometry.
+//
+//  This is the fix for hair reading as a flat mass. A flat strip
+//  has one normal across its whole face, and every strip pointing
+//  roughly the same way returns the same dot(NORMAL, LIGHT) - so
+//  the entire head of hair thresholds at once into a single
+//  undifferentiated shape with no skull form in it. Blend toward
+//  the scalp normal and the mass shades as one volume following the
+//  head, while each strip keeps enough of its own normal to stay
+//  legible as a separate stroke.
+//
+//  Expects the bake to have written the scalp normal into the
+//  MultiMesh INSTANCE COLORS, encoded n * 0.5 + 0.5.
+//  Requires use_colors on the MultiMesh.
+// -------------------------------------------------------------
+group_uniforms Hair.Root_Normal;
+// Light each strip with the surface normal at its root instead of its own (hair reads as one mass).
+uniform bool use_root_normal = false;
+// 0 = each strip shades as its own flat plane (the flat-mass
+// failure). 1 = the hair shades purely as a skull-shaped volume and
+// individual strands stop reading. 0.6 - 0.8 keeps both.
+instance uniform float root_normal_blend : hint_range(0.0, 1.0, 0.005) = 0.7;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  STRIP BEND
+//  Curves the strip away from its root, weighted by height, so a
+//  strand can be posed or blown without bones or an IK solver.
+//
+//  UNLIKE THE TAPER, THIS MUST ROTATE THE NORMAL TOO. A taper only
+//  narrows a planar card, so the surface keeps facing the same way.
+//  A bend genuinely turns the surface - and since this shader's
+//  entire luminance arm is dot(NORMAL, LIGHT), a bend that left
+//  NORMAL alone would give every strand in a head of hair identical
+//  shading no matter which way it curved. The whole point of the
+//  system, that light describes form, would quietly stop working.
+//  So the same rotation is applied to both.
+//
+//  Rodrigues rotation about a horizontal axis chosen by
+//  bend_direction, by an angle that grows with height.
+// -------------------------------------------------------------
+group_uniforms Hair.Strip_Bend;
+// Bend the strips (hair) along their length.
+uniform bool use_strip_bend = false;
+// Total turn at the tip, in degrees.
+instance uniform float bend_angle : hint_range(-180.0, 180.0, 0.25) = 0.0;
+// Which way it curves, around the strand's own axis.
+instance uniform float bend_direction : hint_range(-180.0, 180.0, 0.5) = 0.0;
+// How the turn is distributed. 1 = even along the length.
+// Above 1 keeps the root straight and curls only the tip - which
+// is what hair actually does. 2 to 3 is a good starting range.
+instance uniform float bend_falloff : hint_range(0.2, 6.0, 0.01) = 2.0;
+
+// --- WAVE: the turn oscillates instead of only accumulating -----
+// A plain bend is monotonic - it curves one way and keeps going.
+// Adding a sine to the angle makes the strand snake back on itself,
+// which is what a wave is.
+instance uniform float wave_amount : hint_range(0.0, 30.0, 0.05) = 0.0;
+// How many S-bends along the length. 1.5 to 3 reads as wavy hair.
+instance uniform float wave_count : hint_range(0.0, 8.0, 0.02) = 2.0;
+// Offset along the wave. Drive this PER STRAND from instance data
+// or every strand waves in lockstep and the head reads as
+// corrugated metal rather than hair.
+// Node-wide OFFSET added to the per-strand phase in COLOR.a. Useful
+// for shifting a whole zone; the variation itself comes from the bake.
+instance uniform float wave_phase : hint_range(0.0, 1.0, 0.001) = 0.0;
+
+// --- CURL: the bend DIRECTION advances up the strand ------------
+// Bend turns the strand; curl turns the direction it is turning
+// in, so the tip corkscrews instead of arcing in one plane.
+// 360 is one full rotation over the strand's length.
+instance uniform float curl_twist : hint_range(-360.0, 360.0, 0.25) = 0.0;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  STRIP TAPER
+//  Narrows a flat card toward its tip in the vertex stage, so a
+//  hair strand, a leaf or a feather can be modelled as a plain
+//  rectangle and shaped live instead of re-exported.
+//
+//  Safe to leave on in this general-purpose shader because it is
+//  gated and does nothing by default. It assumes the strip's ROOT
+//  IS AT Y=0 growing toward +Y - do not enable it on a character
+//  or a backdrop, where it would squash the mesh sideways.
+//
+//  Normals are not recomputed, which is fine here: narrowing a
+//  planar card in X does not change which way it faces. It would
+//  NOT be fine for a taper that curved the surface.
+// -------------------------------------------------------------
+// The numeric controls below are INSTANCE uniforms. One material
+// file is shared by every hair node, but each MultiMeshInstance3D
+// carries its own values - found in the Inspector under
+// GeometryInstance3D -> Geometry -> Instance Shader Parameters, and
+// settable from script with set_instance_shader_parameter().
+//
+// The enable flags stay plain uniforms: they are bools, which
+// instance uniforms do not support, and every hair node wants them
+// on together anyway.
+group_uniforms Hair.Strip_Taper;
+// Strip taper: narrows flat cards toward the tip (hair, leaves). Only for strips grown along +Y from y = 0.
+uniform bool use_strip_taper = false;
+// Tilt the normal to follow a taper. Only meaningful on tubes -
+// leave off for flat cards, where it does nothing anyway.
+uniform bool use_cone_normals = false;
+// Height the strip was authored at, so t reads 0 at root, 1 at tip.
+instance uniform float strip_height = 1.0;
+// WIDTH - or RADIUS on a tube, since it scales X and Z together.
+// Applied in the shader rather than by scaling the instance.
+// That matters: non-uniform instance scale is applied AFTER vertex(),
+// so it stretches the bent arc along world axes and distorts any
+// strand that has curved off-axis. Scale the instance UNIFORMLY for
+// length and set width here, and the bend stays correct at any angle.
+instance uniform float strand_width : hint_range(0.05, 4.0, 0.01) = 1.0;
+// Width at the tip as a fraction of the root. Avoid going below
+// about 0.1 - a sub-pixel tip flickers through the threshold.
+instance uniform float tip_width : hint_range(0.0, 1.5, 0.005) = 0.25;
+// Shape of the taper. 1 = straight sides. Above 1 holds width
+// then narrows late; below 1 narrows immediately then runs thin.
+// PER MATERIAL since v35, not per node - see the v35 changelog note
+// on the instance uniform ceiling.
+uniform float taper_curve : hint_range(0.2, 4.0, 0.01) = 1.0;
+// CURVE PROFILE. Assign a CurveTexture and the taper follows the
+// shape you draw instead of a power function. Sampled left to right
+// from root to tip: the curve's VALUE is the width at that height,
+// so 1.0 is full root width and 0.0 is a point.
+// This is what a power curve cannot do - a bulge partway up, a
+// sudden narrowing then a long thin run, a slight swell before the
+// tip. Real hair clumps are not monotonic.
+// When assigned, taper_curve and tip_width are ignored: the curve
+// IS the profile. Leave empty to use the power function.
+uniform sampler2D taper_profile : hint_default_black, filter_linear;
+// Taper by the drawn profile curve instead of the plain power curve.
+uniform bool use_taper_profile = false;
+
+// FLATTEN. Squashes the cross-section into an ellipse, so a tube
+// reads as a flattened lock rather than a length of dowel. Acts on
+// Z alone - the axis the bake aims along the scalp normal - so the
+// lock is pressed against the head and keeps its width lying in the
+// tangent plane.
+// Harmless on flat cards, like everything else in this group: their
+// z is zero, so the position does not move, and their normal is
+// already face-on, so dividing z and renormalising changes nothing.
+// One code path serves cards and tubes.
+// No enable flag. 0 is round and costs a compare.
+// 0 = round. Past about 0.7 the base starts vanishing edge-on at
+// grazing angles, which is the failure tubes were adopted to avoid -
+// at that point you are trading one problem for the other.
+instance uniform float flatten : hint_range(0.0, 0.9, 0.01) = 0.0;
+// How far up the strand the flatness carries. Low values flatten
+// only the very base; 2-3 keeps a lock flat for most of its length
+// and lets the tip round off.
+// PER MATERIAL since v35, not per node - see the v35 changelog note.
+uniform float flatten_falloff : hint_range(0.2, 6.0, 0.01) = 2.0;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  HIGHLIGHT / BURNISH  -  fine grit wear, strongest at the peak
+//
+//  Hashes in 3D on purpose. A 2D hash on a surface extrudes along
+//  the unused axis, so a figure picks up columns of identical grit
+//  reading as vertical stripes of dots that ignore the lighting.
+//
+//  Three dials, and they do different jobs:
+//    burnish_reach   how far DOWN the luminance range wear extends
+//    burnish_amount  how much ink goes at the peak, 0 to 1
+//    burnish_gain    multiplies the whole curve past what amount
+//                    alone can reach - use this when amount and
+//                    reach are both maxed and marks still show
+// -------------------------------------------------------------
+//  Removes ink incoherently rather than in a pattern, the way an
+//  artist scuffs down the parts that are about to take ink.
+//
+//  There is no need to find the highlight's position: luminance IS
+//  the distance from it. burnish_reach is measured DOWN the
+//  luminance range from peak, so the worn area automatically follows
+//  the form's own highlight - which is what you want on a hand or a
+//  cheek, where a screen-space circle would be wrong.
+//
+//  Uses a hash rather than a texture, so there is no pattern to
+//  become evident. This is what breaks up the regularity of the
+//  scumble marks it sits on top of.
+// -------------------------------------------------------------
+group_uniforms Highlight.Burnish;
+// 0 = off. How much ink is worn away at the very peak.
+uniform float burnish_amount : hint_range(0.0, 1.0) = 0.0;
+// How far DOWN the luminance range the wear extends.
+// Small = a tight worn spot. Large = wear across the whole lit side.
+uniform float burnish_reach : hint_range(0.01, 1.0) = 0.3;
+// Grit size. Higher = finer. On a 2m figure in object space,
+// 100 - 400 reads as sandpaper. Too high and the cells go
+// sub-pixel and shimmer under motion.
+uniform float burnish_grit = 400.0;
+// LOW = camera-anchored   HIGH = sticks to the object
+uniform float burnish_pov_cam_to_obj : hint_range(0.0, 1.0) = 1.0;
+// GAIN. burnish_amount tops out at 1.0, which only removes ink from
+// the very peak of the highlight. This multiplies the whole wear
+// curve so the effect reaches further down the luminance range and
+// bites harder everywhere. Raise it when amount and reach are both
+// at 1.0 and the scumble pattern is still legible underneath.
+uniform float burnish_gain : hint_range(1.0, 12.0) = 1.0;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  HIGHLIGHT / SCUMBLE  -  white cross-hatching in the highlights
+// -------------------------------------------------------------
+//  The inverse of cross-hatching. Where luminance is HIGH, a second
+//  set of perpendicular marks CUTS AWAY the ink, as though the
+//  engraver came back through the thinning lines and broke them up.
+//
+//  Material character comes from three of these together:
+//    fabric  wide spacing, moderate width, wobble 1.0 (irregular)
+//    skin    tighter spacing, narrower marks, wobble ~0.5
+//    metal   tightest spacing, widest marks, wobble 0.0 (regular)
+// -------------------------------------------------------------
+group_uniforms Highlight.Scumble;
+// 0 = off. Higher pulls scumbling down out of the highlights and
+// further into the midtones.
+uniform float scumble_amount : hint_range(0.0, 1.0) = 0.0;
+// spacing of the cuts. Higher = tighter, more frequent.
+uniform float scumble_scale = 60.0;
+// how wide the cuts grow at full brightness.
+uniform float scumble_width : hint_range(0.0, 1.0) = 0.5;
+// Random variation in that width, from the same noise field.
+// SEPARATE from scumble_wobble: this thickens and thins the cuts,
+// while wobble bends them. Keep it small - it is an absolute shift
+// on a 0..1 width, so 0.2 is already a lot.
+uniform float scumble_width_var : hint_range(0.0, 0.5) = 0.0;
+// Angle of the scumble cuts, in degrees.
+uniform float scumble_angle : hint_range(-180.0, 180.0) = 90.0;
+// BENDS the cuts sideways - this is the shape of the waves.
+// Measured in CUT WIDTHS: 1.0 means a cut wanders by one full gap to
+// its neighbour, whatever scumble_scale is.
+// 0 = mechanically regular (metal)   high = loose and hand-cut
+// At high scumble_scale one cut spacing is a very small physical
+// distance, so values above 1 are normal there. 4 means cuts wander
+// by four of their own spacings.
+uniform float scumble_wobble : hint_range(0.0, 8.0) = 0.0;
+// Size of the irregularity field. Lower = variation happens across
+// groups of marks. Higher = each mark differs from its neighbour.
+// Roughly how many irregularity cycles across the object. Around
+// 15-25 on a 2m figure: variation that changes down an arm rather
+// than across the whole body.
+uniform float scumble_var_scale = 18.0;
+// The irregularity field. Assign a NoiseTexture2D. Cellular reads as
+// a chipped, bitten tool mark; Value gives blocky steps; Simplex is
+// the flowing spaghetti look, which suits cloth but not flat stone
+// or metal. This is deliberately NOT the same texture as the wobble
+// arm, which wants smooth flow.
+uniform sampler2D scumble_tex : hint_default_black, filter_linear, repeat_enable;
+// LOW = camera-anchored   HIGH = sticks to the object
+// Scumble marks are made by a tool on a surface, so object space is
+// usually right. Camera space makes them swim during motion.
+uniform float scumble_pov_cam_to_obj : hint_range(0.0, 1.0) = 1.0;
+group_uniforms;
+
+// LABELS (10 Oct 2026, Orion: buildings of pasted paper -- faded newspapers, notices, advertisements). Prints a
+// collage faintly INTO the paper and the brown tone, under the woodcut lines: one scrap per panel, each panel
+// its own piece of the collage at its own slight angle, faded in a rough eroded patch. Needs the per-panel UVs
+// of the district building sets. Off = v36 exactly.
+group_uniforms Labels;
+// Labels: collage scraps printed into the paper and tone under the lines, one per panel (needs panel UVs).
+uniform bool use_labels = false;
+// Collage sheet 1 (Label Sheets says how many sheets are used).
+uniform sampler2D label_tex : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;
+// up to four collage sheets: with Mix All each panel picks one at random from the first Label Sheets slots;
+// Sheet 1 - 4 shows that sheet alone on every panel, to judge which works
+uniform sampler2D label_tex_2 : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;
+// Collage sheet 3.
+uniform sampler2D label_tex_3 : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;
+// Collage sheet 4.
+uniform sampler2D label_tex_4 : source_color, hint_default_white, filter_linear_mipmap, repeat_enable;
+// how many of the slots are filled (Mix All draws from these)
+uniform int label_sheets : hint_range(1, 4) = 4;     // how many of the slots are filled (Mix All draws from these)
+// Which sheet: Mix All = each panel picks one; Sheet n = every panel uses that sheet.
+uniform int label_sheet : hint_enum("Mix All", "Sheet 1", "Sheet 2", "Sheet 3", "Sheet 4") = 0;
+// SCALE of the print: metres the collage's WIDTH covers on a wall (its height follows the image's aspect).
+// BIGGER = bigger print (larger letters, fewer of them); smaller = finer print
+uniform float label_size : hint_range(0.2, 40.0) = 6.0;
+// per-panel size variety: each panel's scrap is scaled by a random factor between 1 / (1 + this) and (1 + this)
+// (0 = every scrap the same size; 1 = from half to double)
+uniform float label_size_var : hint_range(0.0, 3.0) = 0.5;
+// how strongly the print shows: 0.1 - 0.2 = faded down to 10 - 20 percent
+uniform float label_strength : hint_range(0.0, 1.0) = 0.15;
+// stretches the print's darks (the text) before the fade
+uniform float label_contrast : hint_range(0.5, 4.0) = 1.6;
+// each panel's scrap is turned by up to this many degrees, either way
+uniform float label_rotate : hint_range(0.0, 45.0) = 6.0;
+// ERODED PATCH: how much of each panel loses its print (0 = none, 1 = nearly all), the size of the worn
+// patches (per metre), and how soft their edges are
+uniform float label_erosion : hint_range(0.0, 1.0) = 0.35;
+// Size of the worn patches eaten out of the labels.
+uniform float label_erosion_scale : hint_range(0.05, 5.0) = 0.6;
+// How soft the worn patches' edges are.
+uniform float label_erosion_soft : hint_range(0.01, 0.5) = 0.15;
+// WORLD SHEETS (12 Oct 2026, Orion: labels on the ground -- "this base could be made of laid-out paper"). The ground
+// has no panel UVs, so its labels were one scrap stretched over the whole terrain. On: the labels are laid out by
+// world position instead -- a grid of paper sheets in rows (each row shifted), each sheet its own scrap, turn and wear.
+uniform bool label_world_sheets = false;
+// the sheets' size in metres
+uniform float label_sheet_m : hint_range(0.2, 10.0) = 1.2;
+group_uniforms;
+
+group_uniforms Noise.Aquatint;
+// Multiplied into the paper -> tonal grain beneath the ink.
+uniform sampler2D aquatint_tex : hint_default_white, filter_linear, repeat_enable;
+// Aquatint strength.
+uniform float aquatint_amount    : hint_range(0.0, 1.0) = 0.0;
+// Aquatint grain size (higher = finer).
+uniform float aquatint_scale     = 25.0;
+// Aquatint: where the grain prints (higher = more of it).
+uniform float aquatint_threshold : hint_range(0.0, 1.0) = 0.5;
+// LOW = window / screen space   HIGH = sticks to the object
+// Aquatint is the tone of the SHEET, so LOW is the physically honest
+// choice here - unlike tooth, which describes the object.
+uniform float aqua_pov_win_to_obj : hint_range(0.0, 1.0) = 0.0;
+group_uniforms;
+
+group_uniforms Noise.PaperTooth;
+// Multiplied against the ink mask -> holes inside the ink lines.
+uniform sampler2D tooth_tex : hint_default_white, filter_linear, repeat_enable;
+// Paper tooth strength: how much the fibres bite into the lines and draw ink out.
+uniform float tooth_amount    : hint_range(0.0, 1.0) = 0.0;
+// Size of the paper fibres (higher = finer).
+uniform float tooth_scale     = 60.0;
+// How deep into the fibre field the bites reach (higher = more, bigger bites).
+uniform float tooth_threshold : hint_range(0.0, 1.0) = 0.5;
+// DEPTH IN. How far white wedges bite INTO a stroke from its edge.
+// 0 = tooth spread evenly through the ink. Small values nibble the
+// edge; large values reach the centre and break the line.
+uniform float tooth_depth_in : hint_range(0.0, 1.0) = 0.0;
+// DEPTH OUT. How far ink is drawn OUT of the stroke along the paper
+// fibre, into what would otherwise be blank paper. 0 = off.
+// The same fibre field does both, so wedges bitten out of one side
+// and ink pulled out of the other belong to the same grain.
+// RANGE (10 Oct 2026, Orion: wedges of ink never reached the neighbouring line, although Blender's did):
+// 0 - 4 like Blender's Distance Out. The old 0 - 1 stopped the reach at a quarter of the pattern range,
+// short of the gap in anything lighter than a dark midtone; Blender's working values were 3 - 3.6.
+uniform float tooth_depth_out : hint_range(0.0, 4.0) = 0.0;
+// TONAL WINDOW. Where along the luminance range the tooth is
+// allowed to act. Not a tilt - a floor and a ceiling, so the arm
+// runs at FULL strength through the midtones and fades out at
+// whichever end you choose to protect.
+//
+// Tooth has to be pushed hard to register in the midtones, and at
+// that strength it turns solid shadow spotty. Raise the dark spare
+// and the darks close up while the midtones keep everything.
+//
+// Unlike ink_bias, this never moves the waterline, so the areas of
+// light and dark stay exactly where you put them.
+
+// Below this luminance the tooth fades out. 0 = no darks spared.
+uniform float tooth_dark_spare : hint_range(0.0, 1.0) = 0.0;
+// Above this luminance the tooth fades out. 1.5 = never, which is
+// usually right since scumble and burnish already work the lights.
+uniform float tooth_light_spare : hint_range(0.0, 1.5) = 1.5;
+// How gradually each end fades. Small = an abrupt tonal edge.
+uniform float tooth_spare_blend : hint_range(0.01, 0.5) = 0.15;
+// LOW = camera-anchored   HIGH = sticks to the object
+// tooth_scale was calibrated for camera space. At HIGH, drop it to 2 - 8.
+uniform float tooth_pov_cam_to_obj : hint_range(0.0, 1.0) = 1.0;
+// Rotates the tooth field. Set to line_angle + 90 for
+// perpendicular bite into the strokes.
+uniform float tooth_angle : hint_range(-180.0, 180.0) = 0.0;
+// ASPECT. Stretches the tooth field along one axis, so bites become
+// elongated wedges rather than round nibbles. Set tooth_angle to
+// match line_angle and raise this to drive knife shapes in from the
+// sides of a stroke. 1.0 = round.
+uniform float tooth_aspect : hint_range(0.1, 10.0) = 1.0;
+// FIELD (v36, from the Blender port). 0 = the v29 behaviour exactly:
+// tooth_tex sampled at coord x tooth_scale, raw bleed. 1 = the Blender
+// port's Paper Tooth: procedural Voronoi distance-to-edge at
+// coord x tooth_scale (z = 0 slice of the 3D field, randomness below),
+// and the port's bleed fixes -- the field is normalised by 0.5 (its
+// real top) for the draw-OUT test, and tooth_depth_out is scaled by
+// 0.25 so it reads in honest units. Blender numbers mean the same
+// thing here only in mode 1.
+uniform int tooth_field : hint_enum("Texture (v29)", "Voronoi Edges") = 0;
+// Voronoi Edges field: how irregular the fibre cells are (0 = a grid).
+uniform float tooth_randomness : hint_range(0.0, 1.0) = 0.81043;
+// DRAW-OUT BOOST (9 Oct 2026): more ink drawn out along the fibres past the line edges (Tooth Depth
+// Out sets how far). 0 = v36 behaviour; 0.3 = Blender's coverage at the same settings (Godot's tooth
+// field tops out ~12% lower); 1 = strong (the field divided by 0.2 instead of 0.5).
+uniform float tooth_out_boost : hint_range(0.0, 1.0) = 0.0;
+// GAP REACH (10 Oct 2026): Depth Out measured as a share of the paper GAP instead of pattern units, so the
+// same setting reaches equally far in light and dark areas. 1 = the wedges reach the middle of the gap,
+// where they meet the neighbouring line's; above 1 they meet thicker (bridges). Off = Blender's units.
+uniform bool tooth_out_gap = false;
+// DISTANCE (10 Oct 2026): the tooth fades out from Far Start to Far End, metres from the camera, so it
+// stops adding noise in the distance. Far End 0 (or not above Far Start) = no limit, as before.
+uniform float tooth_far_start : hint_range(0.0, 500.0, 0.5) = 0.0;
+// Distance (metres from the camera) where the tooth has fully faded out; see Tooth Far Start.
+uniform float tooth_far_end : hint_range(0.0, 500.0, 0.5) = 0.0;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  NOISE ARMS
+//  Assign NoiseTexture2D resources. FastNoiseLite:
+//    tooth / aquatint -> Cellular type
+//    roughness / wobble -> Simplex or Perlin
+//  All amounts default to 0.0, so unassigned slots are harmless.
+// -------------------------------------------------------------
+// PIXEL LOD (18 Oct 2026): Wobble and Sea Roughness (Noise fields) leave out octaves finer than Noise LOD Px on
+// screen, and Paper Tooth (Voronoi) fades its bites out below it -- so a walking character's grain doesn't buzz.
+// Off = as before. Up close nothing changes; at a distance the finest grain goes first.
+group_uniforms Noise.PixelLOD;
+uniform bool use_noise_lod = false;
+// Smallest grain kept, in screen pixels (2 = nothing under two pixels across).
+uniform float noise_lod_px : hint_range(0.5, 8.0) = 2.0;
+group_uniforms;
+group_uniforms Noise.SeaRoughness;
+// Line edge variation. Added to luminance, so it breaks up the
+// waterline itself. The -0.5 keeps it from lifting net luminance.
+uniform sampler2D roughness_tex : hint_default_white, filter_linear, repeat_enable;
+// How much the noise moves the waterline (how ragged the line edges are).
+uniform float roughness_amount : hint_range(0.0, 1.0) = 0.0;
+// ADD ONLY. Roughness is ink spreading into paper fibre at the edge
+// of a stroke, so it should only ever put ink DOWN. Bidirectional
+// roughness punches light flecks into solid shadow, which is paper
+// tooth's job, not this arm's. Leave this on unless you want the
+// old two-way behaviour.
+// Note it darkens on average - raise ink_bias by about half
+// roughness_amount to hold the same overall weight.
+uniform bool roughness_add_only = true;
+// WASHOUT (v36, from the Blender port). Roughness is a luminance
+// offset, so alone it prints a faint ragged line where the light has
+// already washed the pattern line away. Above 0 it scales with the
+// line width left: full below lum 1 - washout, gone at lum 1.
+// 0 = the old behaviour. Clamped surfaces sit at exactly 1 in the
+// light, so even a tiny value clears them.
+uniform float roughness_washout : hint_range(0.0, 1.0) = 0.0;
+// Size of the roughness noise (higher = finer grain).
+uniform float roughness_scale  = 8.0;
+// LOW = window / screen space   HIGH = sticks to the object
+uniform float rough_pov_win_to_obj : hint_range(0.0, 1.0) = 0.0;
+// FIELD (v36, from the Blender port). 0 = the v29 behaviour exactly:
+// roughness_tex at coord x roughness_scale. 1 = Blender's Noise
+// Texture as the port's Sea Roughness uses it (FBM, normalised, 3D at
+// z = 0, roughness 0.5, lacunarity 2) with the two dials below, so the
+// salon's Roughness Scale means the same thing here.
+uniform int roughness_field : hint_enum("Texture (v29)", "Noise (Blender)") = 0;
+// Procedural roughness: octaves of detail in the noise.
+uniform float roughness_detail : hint_range(0.0, 8.0) = 2.0;
+// Procedural roughness: how much the noise is warped.
+uniform float roughness_distortion : hint_range(0.0, 50.0) = 12.2;
+// DISTANCE FADE (10 Oct 2026, Orion: far ground reads as TV static in motion). A grain cell 1 / roughness_scale
+// across shrinks below a pixel with distance, and then every frame samples a different random grain: static.
+// On, the grain blends out (to its average darkening, so the tone stays put) where a cell is smaller than
+// rough_fade_px_max pixels, gone below rough_fade_px_min. Measured like anti-moire (smooth when that is on).
+uniform bool rough_fade = false;
+// A roughness grain this many pixels across or less is fully faded to its average (no sparkle).
+uniform float rough_fade_px_min : hint_range(0.25, 10.0) = 1.5;
+// A roughness grain this many pixels across or more shows in full; blends in between.
+uniform float rough_fade_px_max : hint_range(0.5, 20.0) = 4.0;
+group_uniforms;
+
+group_uniforms Noise.Wobble;
+// Perturbs the pattern coordinate before the sine - hand-drawn waver.
+uniform sampler2D wobble_tex : hint_default_white, filter_linear, repeat_enable;
+// Measured in LINE WIDTHS, not world units. 0.3 means each line
+// wavers by about a third of the gap to its neighbour, whatever
+// wave_scale happens to be. Above 1.0 lines start crossing.
+uniform float wobble_amount : hint_range(0.0, 2.0) = 0.0;
+// Roughly how many waver cycles across the object. On a 2m figure
+// in object space, single digits give broad drift, tens give a
+// hand-drawn waver.
+uniform float wobble_scale  = 8.0;
+// LOW = camera-anchored   HIGH = sticks to the object
+// Object space spans roughly -1..1 on a unit mesh, so the waver may
+// vanish at HIGH until wobble_scale is pushed well above 3.0.
+uniform float wobble_pov_cam_to_obj : hint_range(0.0, 1.0) = 1.0;
+// FIELD (v36, from the Blender port). 0 = the v29 behaviour exactly:
+// wobble_tex at coord x wobble_scale. 1 = Blender's Noise Texture as
+// the port's Wobble uses it (FBM, normalised, 3D at z = 0, Detail 2,
+// no distortion), so the salon's Wobble Scale means the same here.
+uniform int wobble_field : hint_enum("Texture (v29)", "Noise (Blender)") = 0;
+// Procedural wobble: octaves of detail in the noise.
+uniform float wobble_detail : hint_range(0.0, 8.0) = 2.0;
+// Procedural wobble: how much the noise is warped.
+uniform float wobble_distortion : hint_range(0.0, 50.0) = 0.0;
+group_uniforms;
+
+// =============================================================
+//  LIGHT  -  everything lives here so ALBEDO can never modulate it
+// =============================================================
+// =============================================================
+//  FRAGMENT
+//  Exists only to bind a normal map. Everything else lives in
+//  light(), so ALBEDO is never written and cannot modulate output.
+//
+//  Setting NORMAL_MAP here means NORMAL inside light() arrives
+//  already perturbed - the hatching has no way to know the mesh did
+//  not move. That is what makes drawn expressions possible.
+//
+//  REQUIRES UVs AND TANGENTS on the mesh. The rest of this shader
+//  uses object and view space and needs neither, so this is the one
+//  feature that adds an unwrapping requirement. Leave the slot empty
+//  and nothing changes.
+// =============================================================
+group_uniforms Normal_Map;
+// Bind a tangent-space normal map (needs UVs and tangents on the mesh).
+uniform bool use_normal_map = false;
+// Normal map strength.
+uniform float normal_depth : hint_range(0.0, 8.0) = 1.0;
+// Base layer. Static surface detail that is always present -
+// skin texture, permanent creases, the set of the brow.
+uniform sampler2D normal_tex : hint_normal;
+group_uniforms;
+
+// PERFORMANCE (11 Oct 2026, measured at 1920 x 1080 on an RTX 3090: each extra lamp cost 0.9 - 1.5 ms, because every
+// spot / omni light's pass redrew the whole woodcut for every pixel of the screen tiles its reach touched -- and only
+// then threw the result away where the lamp lit nothing). Undo: untick it (or restore
+// _backups_outside_project\woodCUT_before_early_out_20261011.gdshader).
+group_uniforms Performance;
+// Positional Early Out: a lamp's pass skips the woodcut work on pixels its light does not reach (outside its range /
+// cone). Only with Positional Own Light, which the district turns on at run time. Off = exactly as before.
+uniform bool positional_early_out = true;
+group_uniforms;
+
+// REVEAL FIRST (19 Oct 2026, Orion: the Block Print idea -- patterns show only where a surface is lit strongly enough or
+// close enough -- as a real saving). The reveal is worked out at the START of light(): an unrevealed pixel prints two flat
+// plates (ink, and Plate Light where light falls) and SKIPS the whole woodcut. (In the BLOCK PRINT project the woodcut was
+// always computed and then mixed with the plates, so it saved nothing.) Measured on the trees' leaves, chestnut-group view,
+// RTX 3090: -1.7 ms noon, -2.1 ms night. Revealed = this light's brightness here above Reveal Light (lamps: Lamp Reveal
+// Light) AND nearer than Reveal Near; or within Close Reveal of her in any light. Off = exactly as before.
+group_uniforms Reveal_First;
+uniform bool use_reveal_first = false;
+// the Sun (and moon): patterns only where its light here is above this
+uniform float rf_reveal_light : hint_range(0.0, 2.0) = 0.75;
+// lanterns and lamps (spot / omni): patterns where their light here is above this -- lower, so a lamp reveals
+uniform float rf_lamp_reveal_light : hint_range(0.0, 2.0) = 0.15;
+// spread of the light reveal (bigger = a more gradual edge; the edge pays for both looks)
+uniform float rf_reveal_soft : hint_range(0.0, 0.5) = 0.08;
+// ...and only nearer than this, metres from the camera
+uniform float rf_reveal_near_m : hint_range(0.0, 200.0) = 15.0;
+// patterns fade out over this many metres beyond Reveal Near
+uniform float rf_reveal_fade_m : hint_range(0.1, 50.0) = 5.0;
+// within this many metres of HER, patterns show in any light (0 = off)
+uniform float rf_close_m : hint_range(0.0, 20.0) = 0.0;
+uniform float rf_close_fade_m : hint_range(0.1, 10.0) = 1.5;
+// the plate where light falls but the pattern isn't revealed (the other plate is Ink Color)
+uniform vec3 rf_plate_color : source_color = vec3(0.45, 0.46, 0.45);
+// how much light makes the light plate (below: ink)
+uniform float rf_plate_cut : hint_range(0.0, 1.0) = 0.25;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  STIPPLE  -  clumped ink dots for stone and brick
+// -------------------------------------------------------------
+//  ADDS ink rather than removing it, and by default ignores
+//  luminance - so the material still reads as stone in full light,
+//  where hatching alone would leave blank paper.
+//
+//  Assign a NoiseTexture2D. Cellular gives round pocks; Simplex
+//  gives softer mottling. Object space by default, because stone
+//  belongs to the wall rather than to the page.
+// -------------------------------------------------------------
+group_uniforms Stipple;
+// 0 = off. How much of the surface becomes dots.
+uniform float stipple_coverage : hint_range(0.0, 1.0) = 0.0;
+// The stipple dot pattern (a noise texture).
+uniform sampler2D stipple_tex : hint_default_black, filter_linear, repeat_enable;
+// Stipple dot size (higher = smaller, denser dots).
+uniform float stipple_scale = 8.0;
+// Clumping. 0 = evenly scattered, 1 = gathered into patches.
+uniform float stipple_clump : hint_range(0.0, 1.0) = 0.7;
+// Size of the clumping field relative to the dots.
+uniform float stipple_clump_scale : hint_range(0.02, 0.5) = 0.15;
+// Flips the sampled field. With Cellular / Distance, cell CENTRES
+// are dark and boundaries bright - so untick this and you get a web
+// of cell walls; tick it and you get isolated dots at cell centres.
+uniform bool stipple_invert = false;
+// DOT SIZE, independent of spacing. Sharpens the sampled field
+// toward its peaks before thresholding, so marks shrink while cell
+// spacing stays put. 1.0 = no change. Raise it to spread dots out
+// without making them bigger.
+uniform float stipple_falloff : hint_range(0.2, 12.0) = 1.0;
+// WARP. Displaces the sampling coordinate before the lookup, which
+// breaks BOTH the cellular lattice and the texture's tile repeat.
+// FastNoiseLite's own Domain Warp fixes the lattice but cannot fix
+// the tiling, because the texture repeats whatever is baked into it.
+// The offset is QUANTISED into blocks, so every mark inside a block
+// is displaced by the SAME amount. That means marks translate
+// rigidly instead of shearing - a smooth warp varies across the
+// mark itself and stretches dots into banana shapes.
+uniform float stipple_warp : hint_range(0.0, 1.0) = 0.0;
+// How many displacement blocks per texture tile.
+// LOW  = large blocks. Whole groups of marks move together. No
+//        distortion, few marks cut at block edges. Start here.
+// HIGH = fine blocks. More thorough randomisation, but more marks
+//        land across a boundary and get chopped in half.
+uniform float stipple_warp_cells : hint_range(0.25, 16.0) = 1.0;
+// Random ROTATION per block, in DEGREES. Same blocks as the offset,
+// so marks still translate rigidly - they are just turned as well,
+// which stops every mark facing the same way. 3.14 gives a full
+// random orientation. Marks crossing a block edge will show a seam,
+// so keep stipple_warp_cells low.
+uniform float stipple_warp_rotate : hint_range(0.0, 180.0) = 0.0;
+// 0 = same coverage in light and shade (stone reads everywhere)
+// 1 = dots fade out in light, like ordinary hatching
+uniform float stipple_lum_response : hint_range(0.0, 1.0) = 0.0;
+// LOW = camera-anchored   HIGH = sticks to the object
+uniform float stipple_pov_cam_to_obj : hint_range(0.0, 1.0) = 1.0;
+
+// POLARITY FLIP
+// On a real rough wall the raised grains catch light and the pits
+// hold shadow, so the same stone reads as DARK specks in sunlight
+// and LIGHT specks in shade. Without this, stipple vanishes in deep
+// shadow because black dots on solid ink are invisible - which is
+// exactly where a wall most needs to still read as stone.
+uniform bool stipple_flip = false;
+// luminance at which the dots change polarity
+uniform float stipple_pivot : hint_range(0.0, 1.0) = 0.5;
+// raggedness of the changeover. 0 leaves a clean contour line.
+uniform float stipple_flip_blend : hint_range(0.0, 0.5) = 0.15;
+group_uniforms;
+
+// STOP-MOTION BOIL (10 Oct 2026, Orion: stop-motion effects -- Toys in the Attic, Jiri Barta). On every stop-motion
+// step the print RE-CUTS a little, as if each frame were a new impression: the wobble, roughness and tooth noise
+// slide to a fresh spot and the lines can shift by a fraction of their spacing. boil_step is written by the
+// district's Stop Motion clock (district1_setup.gd) while the game runs; the editor shows it still. Off = v36.
+group_uniforms Stop_Motion;
+// Boil: on each stop-motion step the print re-cuts a little (noise fields jump, lines shift). Needs the district's Stop Motion.
+uniform bool use_boil = false;
+// how far the noise fields jump each step (in their own noise cells; 0.2 - 0.5 reads as boil, 1+ as chaos)
+uniform float boil_amount : hint_range(0.0, 2.0) = 0.35;
+// how far the LINES themselves jump each step, as a fraction of their spacing (0 = lines hold still)
+uniform float boil_line_jitter : hint_range(0.0, 0.5) = 0.06;
+group_uniforms;
+
+// SUN BOUNCE (11 Oct 2026, Orion's legibility chart: at 11:00 the character is bright on the sun side and very
+// dark round the other side -- this world has no reflected light). In the Sun's own pass, a share of the sun's light
+// also arrives from the OPPOSITE side, a little from below, as if thrown back off the street -- never shadowed. It
+// follows the sun's direction and strength by itself (it fades with the sun at dusk), adds no light to the scene and
+// costs nothing extra. Meant for the characters' materials. Off = unchanged.
+group_uniforms Sun_Bounce;
+// Sun Bounce: reflected light on the side away from the sun (settings below).
+uniform bool use_sun_bounce = false;
+// the share of the sun's light that comes back (0.15 - 0.35 reads as bounce; 1 = as bright as the sun)
+uniform float sun_bounce : hint_range(0.0, 1.0) = 0.25;
+// where it comes from: 0 = level, straight opposite the sun; 1 = steeply up from the street
+uniform float sun_bounce_from_below : hint_range(0.0, 1.0) = 0.35;
+// lets the bounce wrap round toward the sun side (0 = only the side facing away from the sun)
+uniform float sun_bounce_wrap : hint_range(0.0, 1.0) = 0.2;
+group_uniforms;
+
+// COBBLES (10 Oct 2026, Orion: at noon the street has no lines and the player loses the ground --
+// leaning on the vertical paper grain feels like falling). Procedural setts laid in WORLD X/Z on
+// near-level ground: each stone's bevelled flanks tilt the lighting normal (after Flatten Normal, so
+// the terrain grid stays gone) and the joints darken, so a high sun still prints a ring of ink round
+// every stone. No UVs, no texture. Far away, where a stone is only a few pixels, the relief fades to
+// an even tone (Far Darken) instead of shimmering. Off = unchanged.
+group_uniforms Terrain_Cobbles;
+// Cobbles: procedural paving stones on level ground, in world X / Z (settings below).
+uniform bool use_cobbles = false;
+// stones per metre (Paris setts ~ 20-25 cm: 4-5)
+uniform float cobble_per_m : hint_range(0.5, 20.0) = 4.5;
+// a stone is this many times longer than it is wide (rows run along world X; 1 = square)
+uniform float cobble_length : hint_range(0.5, 3.0) = 1.3;
+// how steeply the flanks lean (rise over run at the stone's edge)
+uniform float cobble_depth : hint_range(0.0, 3.0) = 0.8;
+// the depth inside cast shadows (10 Oct 2026, Orion: shallow in the sun, deep in the building shadows);
+// blends with the shadow map, so the shadow's edge goes between the two. Same as Depth = no change.
+uniform float cobble_shadow_depth : hint_range(0.0, 3.0) = 0.8;
+// 0 = flat top with a narrow bevel, 1 = domed all the way across
+uniform float cobble_round : hint_range(0.0, 1.0) = 0.45;
+// share of each cell that is joint, and how dark the joint prints (multiplies the light)
+uniform float cobble_joint : hint_range(0.0, 0.4) = 0.1;
+// How dark the joints between the stones print (multiplies the light; 1 = black joints).
+uniform float cobble_joint_dark : hint_range(0.0, 1.0) = 0.7;
+// row offsets (0 = regular half bond, 1 = random) and per-stone top tilt (mottling)
+uniform float cobble_jitter : hint_range(0.0, 1.0) = 0.6;
+// A random tilt to each stone's top, so neighbouring stones catch the light differently.
+uniform float cobble_tilt : hint_range(0.0, 0.6) = 0.12;
+// turn the rows about the vertical (degrees)
+uniform float cobble_angle : hint_range(-180.0, 180.0) = 0.0;
+// only on ground flatter than this (degrees from level): banks and walls stay smooth
+uniform float cobble_max_slope : hint_range(1.0, 60.0) = 20.0;
+// a stone smaller than Px Min on screen is fully faded, Px Max or more is full relief
+uniform float cobble_fade_px_min : hint_range(0.5, 30.0) = 4.0;
+// A stone this many pixels across or more shows its full relief (it fades below, down to Px Min).
+uniform float cobble_fade_px_max : hint_range(1.0, 60.0) = 10.0;
+// what the faded stones leave behind: light taken off the far ground (match it to the near stones'
+// average so there is no edge where they fade; 0 = flat ground)
+uniform float cobble_far_darken : hint_range(0.0, 0.6) = 0.12;
+// WORN CENTRES (11 Oct 2026, Orion: the line work could erode in the middle of each cobblestone): the light is lifted
+// toward each stone's middle, so the pattern lines thin and break there (worn block) and stay full round the edges.
+// How much the middle is lifted in the light (0 = off; ~0.3 thins the lines, ~0.7 clears them)
+uniform float cobble_wear : hint_range(0.0, 1.0) = 0.0;
+// the same inside cast shadows (blends with the shadow map, like Shadow Depth)
+uniform float cobble_wear_shadow : hint_range(0.0, 1.0) = 0.0;
+// how much of the stone wears (0 = a small spot in the middle, 1 = right out to the edges)
+uniform float cobble_wear_size : hint_range(0.0, 1.0) = 0.5;
+// a ragged edge to the worn patch (0 = a clean soft oval) and the grain of that raggedness (higher = finer)
+uniform float cobble_wear_ragged : hint_range(0.0, 1.0) = 0.35;
+uniform float cobble_wear_grain : hint_range(0.5, 12.0) = 4.0;
+// BEVEL (12 Oct 2026, Orion: the bevel is too wide -- with the hatching its straight lit / shaded band reads as
+// pixelated, jagged lines; the stones look best when the sun washes the bevel out except at the intersections).
+// Bevel Width: how much of the stone is bevelled, as a share of the stone; 0 = no bevel (a flat-topped stone).
+// (12 Oct 2026, Orion: zero must mean zero -- it used to mean "set by Round".)
+uniform float cobble_bevel_width : hint_range(0.0, 0.5) = 0.24;
+// CORNER FOCUS: the bevel shows strongest at the stone's corners -- where the joints meet -- and falls off along the
+// edges away from them (0 = an even bevel all round, as before; 1 = only near the corners)
+uniform float cobble_corner_focus : hint_range(0.0, 1.0) = 0.0;
+// how far along the edge from a corner the bevel lasts (share of the stone)
+uniform float cobble_corner_reach : hint_range(0.02, 1.0) = 0.3;
+// the exponential fall-off: higher = it drops away faster from the corner
+uniform float cobble_corner_sharpness : hint_range(0.2, 10.0) = 3.0;
+// draw the fall-off yourself instead: assign a CurveTexture to Corner Curve (left = at the corner, right = Corner
+// Reach away; up = full bevel) and tick Use Curve
+uniform bool cobble_corner_use_curve = false;
+uniform sampler2D cobble_corner_curve : hint_default_white, filter_linear, repeat_disable;
+// CORNER IN LIGHT (12 Oct 2026, Orion: the corners should always show through, even with the tone plate or full sun;
+// "can the cobble corner that Corner Focus makes just persist in the sunlight -- a minimum it will be erased to?").
+// The corner patch -- strips along the edges near each corner (Corner Light Width, Corner Reach and the fall-off) --
+// keeps at least Corner Darkness, however strong the light. It prints as the woodcut's own lines and tone.
+// Amount: 0 = off, 1 = the full Corner Darkness (in between blends toward it).
+uniform float cobble_corner_in_light : hint_range(0.0, 1.0) = 0.0;
+// how dark the corners stay in the light (12 Oct 2026, renamed from Light Max so higher = darker): 0 = the light may
+// wash them out, ~0.2 a few thin lines, ~0.5 dense lines and the tone plate, 1 = solid ink
+uniform float cobble_corner_in_light_darkness : hint_range(0.0, 1.0) = 0.4;
+// its own width (12 Oct 2026, Orion: keep the bevel hairline-thin, ~0.025, and let only the corners persist): how far
+// in from the stone's edge the persisting corner reaches, independent of Bevel Width (share of the stone)
+uniform float cobble_corner_in_light_width : hint_range(0.0, 0.5) = 0.1;
+// FOLLOWS BEVEL (12 Oct 2026, Orion: "can the curves work from the bevel that is dialed in, even though it is a small
+// number?"): on = the persisting corners use Bevel Width instead of Corner Light Width, so one bevel drives it all
+// (the curve / Corner Reach shape it along the edges); off = Corner Light Width, as above
+uniform bool cobble_corner_in_light_follows_bevel = true;
+// only the darkest parts persist: 1 = just the corner edges facing AWAY from the sun (a real bevel's shaded side),
+// 0 = every side of the corner
+uniform float cobble_corner_in_light_shade_side : hint_range(0.0, 1.0) = 1.0;
+// CORNER IN TONE (15 Oct 2026, Orion: "the cobbles corners need to show through a little bit darker when using the tone
+// plate - so the mid tones"): where the tone plate prints its brown, the same corner patch prints darker -- the brown
+// mixed this far toward the ink (0 = off, unchanged; 1 = solid ink). Uses the corner shape above (Reach, Width /
+// Follows Bevel, Shade Side). Needs the Tone Plate on.
+uniform float cobble_corner_in_tone : hint_range(0.0, 1.0) = 0.0;
+// STREET EDGES (17 Oct 2026, Orion: from each house front outward a gravel shoulder, ONE row of edge stones, then the
+// paving field at its own angle, cut off where it meets the row, and a shallow flat-bottomed gutter down the middle; no
+// sidewalks, no curbs). His drawn center line sets the gutter and both edge rows; the house fronts only set a range: the
+// gravel takes up jagged frontages and the row bends in round a house that juts out. The street-frame map is baked by
+// paris1828\street_edges_bake.py (re-run it after houses move). Same placement as the other street maps. Off = unchanged.
+group_uniforms Terrain_Cobbles.Street_Edges;
+// Street Edges: gravel shoulders, an edge-stone row and a center gutter from the baked street-frame map.
+uniform bool use_street_edges = false;
+// the baked street-frame map (res://street_edges/street_edges.exr): R across the line, G along it, B the edge row, A the
+// gravel's reach (negative = no gutter). Must import Lossless with no mipmaps (it holds metres, not colours).
+uniform sampler2D street_edges_map : hint_default_black, filter_linear, repeat_disable;
+// the edge stones (setts): how long (along the street) and how wide (across) in metres
+// (17 Oct 2026, Orion: half as long as the first try's 1.1 m)
+uniform float street_edge_stone_length : hint_range(0.2, 3.0) = 0.55;
+uniform float street_edge_stone_width : hint_range(0.2, 1.5) = 0.5;
+// LINE WIDTH (17 Oct 2026, Orion: the new stones may have their own line thickness, but they obey the cobble corner
+// rules -- Corner Focus / Reach / the curve, Corner In Light and Corner In Tone, the shade side): the width in METRES of
+// the corner strips round each edge / gutter stone, in place of Corner Light Width / Bevel (0 = the field's own width)
+uniform float street_edge_joint : hint_range(0.0, 0.15) = 0.03;
+// an extra plain outline round those stones that ignores the corner rules (0 = none, the normal setting)
+uniform float street_edge_joint_ink : hint_range(0.0, 1.0) = 0.0;
+// the gutter: its whole width, the flat bottom's width (the rest is the two sloping lips), the stones' length along it
+uniform float street_gutter_width : hint_range(0.2, 3.0) = 1.0;
+uniform float street_gutter_flat : hint_range(0.0, 3.0) = 0.6;
+uniform float street_gutter_stone_length : hint_range(0.3, 3.0) = 1.1;
+// MATCH THE JOINTS (17 Oct 2026, Orion: the gutter stones stay long but their cross joints line up with the edge
+// row's): on = the gutter stone's length is rounded to a whole number of setts, so every gutter joint carries straight
+// across to an edge-row joint (the second gutter row is offset by one sett)
+uniform bool street_gutter_joints_match = true;
+// how steeply the lips lean (shading only, no change to the ground: 0.3 = about 6 cm down over 20 cm) and the light wash
+// of ink they take
+uniform float street_gutter_slope : hint_range(0.0, 1.5) = 0.25;
+uniform float street_gutter_lip_ink : hint_range(0.0, 1.0) = 0.0;
+// REAL DRAIN (18 Oct 2026, Orion: "an actual geometry change"): the drain is now cut into the terrain (8 cm, by
+// paris1828\street_drain_geometry.py), so its lips light from the ground's own shape: on = no Flatten Normal and no
+// lean (Slope above) in the gutter. Off = the old painted-on lean (for a ground without the cut).
+uniform bool street_gutter_real = true;
+// SETTS OFF FLATTEN (18 Oct 2026, Orion: "try skip flatten normal on the sette stones to get them to look a little
+// different than the paving blocks"): on = the edge-row stones keep the ground's own normal instead of Flatten Normal
+uniform bool street_edge_skip_flatten = false;
+// the gravel: where there is no house front (open ground) it stops this far past the edge row (metres); a house that
+// sits back further gets paving in front of it (a forecourt)
+uniform float street_gravel_max : hint_range(0.5, 20.0) = 4.0;
+// the grain: specks per metre (higher = finer), how dark they print, how much each speck tilts the light
+uniform float street_gravel_grain : hint_range(2.0, 40.0) = 10.0;
+uniform float street_gravel_ink : hint_range(0.0, 1.0) = 0.6;
+uniform float street_gravel_lean : hint_range(0.0, 1.0) = 0.25;
+// an even tone over the whole gravel strip (light taken off), so the strip reads as a band between the specks
+uniform float street_gravel_tone : hint_range(0.0, 0.6) = 0.08;
+// share of the specks that are there at all (lower = sparser, more ragged)
+uniform float street_gravel_fill : hint_range(0.0, 1.0) = 0.7;
+// what the specks leave behind far away, where they are too small to draw: light taken off (an even tone)
+uniform float street_gravel_far_tone : hint_range(0.0, 0.6) = 0.15;
+// KEEP IN TONE (Orion's lesson from the test renders: in the Flat street look shade prints flat, so the edge row, gutter
+// and gravel vanish in shade). Where the tone plate prints its brown, the joints, lips and gravel specks print darker --
+// the brown mixed this far toward the ink (0 = off; like Cobble Corner In Tone). Needs the Tone Plate on.
+uniform float street_edges_in_tone : hint_range(0.0, 1.0) = 0.5;
+group_uniforms;
+
+// FLATTEN NORMAL (10 Oct 2026, Orion: the district terrain still prints in squares). The 2 m
+// terrain grid's vertex normals differ by a degree or two corner to corner, and the waterline
+// is a hard step, so the line weight changes along the grid. This bends near-level surfaces
+// toward straight up for the LIGHTING only (shadows are untouched). 0 = off.
+group_uniforms Terrain_Flatten_Normal;
+// How much near-level surfaces are lit as if perfectly flat (kills the terrain's 2 m grid squares). 0 = off.
+uniform float flatten_normal : hint_range(0.0, 1.0) = 0.0;
+// surfaces steeper than this (degrees from level) keep their own normal: river banks, cuts
+uniform float flatten_keep_deg : hint_range(1.0, 89.0) = 25.0;
+group_uniforms;
+
+// TREE SHADOW (17 Oct 2026, Orion: "the shadow on the ground under the tree when there is no sun"). A baked top-down map
+// (paris1828\tree_shadow_map.py: a soft pool under each tree, as wide as its crown) darkens the level ground under the
+// trees, so they stay sat on the street when the Sun gives no shadow. It prints in the street's own style (it lowers the
+// light the Flat waterline / tone plate read), never as a grey smudge. Uses the night-light map's placement (Night Map
+// Origin / Size). Off = unchanged.
+group_uniforms Terrain_Tree_Shadow;
+// Tree shadow: darken the ground under the trees (baked map).
+uniform bool use_tree_shadow = false;
+// The baked tree-shadow map: R = how much tree is overhead (0 = none, 1 = under the crown), G = distance from the trunk.
+uniform sampler2D tree_shadow_map : hint_default_black, filter_linear, repeat_disable;
+// how much light it takes away under a crown (0.3 = a tone, 1 = solid ink)
+uniform float tree_shadow_strength : hint_range(0.0, 1.5) = 0.35;
+// how much of it shows in full sun (0 = only when the Sun is low / down, its energy below Night Day Energy; 1 = always)
+uniform float tree_shadow_in_sun : hint_range(0.0, 1.0) = 0.0;
+// fade it out near the camera: gone nearer than Fade Near, full beyond Fade Near + 6 m (0 = no fade)
+uniform float tree_shadow_fade_near : hint_range(0.0, 60.0) = 0.0;
+// GRADIENT (18 Oct 2026, Orion: "darker at the base of the tree and lighter as it goes out. a controllable gradient"). The
+// map's G = distance from the nearest trunk, 0 at the trunk to 1 at the crown's edge. Strength x Trunk at the trunk, x Rim
+// at the crown's edge, the curve in between (1 = even, above 1 = stays dark longer, below 1 = lightens quickly).
+uniform float tree_shadow_trunk : hint_range(0.0, 1.5) = 1.0;
+uniform float tree_shadow_rim : hint_range(0.0, 1.5) = 0.25;
+uniform float tree_shadow_curve : hint_range(0.2, 5.0) = 1.0;
+group_uniforms;
+
+// NIGHT LIGHTS (10 Oct 2026, Orion: lit windows without real lights). A baked top-down light map
+// over the district adds light to the woodcut's luminance -- no Godot lights, no shadow maps.
+//   R = how strong the pool is here (0 = none)
+//   G = this pool's flicker phase (so neighbours flicker out of step)
+//   B = the light's height: night_height_base + B * night_height_range (metres, world Y)
+// Level surfaces (ground) take R as a pool; walls take it only near the light's height, fading
+// over night_wall_falloff metres above and below -- the glow round a window on its facade.
+// It comes on as the Sun's energy drops (time_of_day.gd fades the Sun instead of switching it off).
+// Off = v36 exactly.
+group_uniforms Terrain_Night_Lights;
+// Night lights: the baked top-down light map lights the ground and walls at night (no real lights).
+uniform bool use_night_lights = false;
+// The baked night-light map: R = pool strength, G = flicker phase, B = the light's height.
+uniform sampler2D night_light_map : hint_default_black, filter_linear, repeat_disable;
+// world X, Z of the map's corner, and how many metres it covers in X and Z (set by the exporter)
+uniform vec2 night_map_origin = vec2(0.0, 0.0);
+// The world size (metres, X / Z) the night-light map covers, from Night Map Origin.
+uniform vec2 night_map_size = vec2(1000.0, 1000.0);
+// the Sun energy that counts as full day: at this energy or more the night lights are off,
+// at 0 they are full on
+uniform float night_day_energy : hint_range(0.01, 4.0) = 0.7;
+// light added at full night. NEGATIVE for the windows material (its ink and paper are swapped,
+// so a lit pane needs LESS luminance to print light)
+uniform float night_strength : hint_range(-3.0, 3.0) = 0.8;
+// light added EVERYWHERE at night, map or not (0 = none). For the windows material: positive, so
+// the unlit panes go dark at night (its ink and paper are swapped: no light prints the light colour)
+// and only the panes with a pool behind them (negative night_strength) stay bright
+uniform float night_base : hint_range(-2.0, 2.0) = 0.0;
+// LAMPLIGHT COLOUR (10 Oct 2026, Orion: strong pools went to the brown tone colour). The pools only ADD LIGHT, so
+// they thin the lines, and with the tone plate on the bare paper stays tone-coloured below Tone Cut Level. This
+// tints the paper toward Night Glow Color by the pool's strength, whatever the tone plate does -- the colour of
+// lamp / candle light spilling out. 0 = off (as before); 1 = the pool's centre is fully that colour.
+uniform float night_glow : hint_range(0.0, 2.0) = 0.0;
+// The colour lamplight tints the paper (strength = Night Glow).
+uniform vec4 night_glow_color : source_color = vec4(0.96, 0.86, 0.62, 1.0);
+// Height (world Y) of a light whose map B value is 0.
+uniform float night_height_base = 0.0;
+// Height range the map's B value spans above Night Height Base.
+uniform float night_height_range = 20.0;
+// walls: how much of the pool they take, and over how many metres above / below the light
+uniform float night_wall_amount : hint_range(0.0, 2.0) = 0.6;
+// Metres above / below a light's height over which a wall stops taking its glow.
+uniform float night_wall_falloff : hint_range(0.1, 10.0) = 2.0;
+// FLICKER: 0 = steady. Procedural = three sines; Texture = flicker_tex scrolled over time,
+// each pool reading its own row (G), so any animated noise you paint becomes the flicker
+uniform float flicker_amount : hint_range(0.0, 1.0) = 0.3;
+// How fast the night lights flicker.
+uniform float flicker_speed : hint_range(0.0, 10.0) = 0.6;
+// Procedural = three sine waves; Texture = Flicker Tex scrolled over time.
+uniform int flicker_source : hint_enum("Procedural", "Texture") = 0;
+// The flicker pattern when Flicker Source is Texture (each light reads its own row).
+uniform sampler2D flicker_tex : hint_default_white, filter_linear, repeat_enable;
+group_uniforms;
+
+// STREET CENTRE (11 Oct 2026, Orion: in the mid shadows, when only a mid-tone is present, the line work and cobbles
+// could fade out toward the middle of the street). A painted top-down map (white = the street's middle, black =
+// untouched, greys between) laid over the world like the night-light map. Where it is white AND the light is a
+// mid-tone, the lines thin toward paper and the cobbles flatten; full sun and deep shadow are left as they are.
+group_uniforms Terrain_Street_Center;
+// Street Centre: fade lines and cobbles toward the middle of the street in the mid-tones (settings below).
+uniform bool use_street_centre = false;
+// the painted map (R used): white = the middle of the street
+uniform sampler2D street_centre_map : hint_default_black, filter_linear, repeat_disable;
+// on = the map covers the same ground as the night-light map (Night Map Origin / Size); off = its own placement
+uniform bool street_map_night_placement = true;
+uniform vec2 street_map_origin = vec2(0.0, 0.0);
+uniform vec2 street_map_size = vec2(1000.0, 1000.0);
+// the mid-tone band it works in (waterline units, the flat ground's light): from Mid Low to Mid High, soft edges
+uniform float street_mid_low : hint_range(0.0, 1.0) = 0.2;
+uniform float street_mid_high : hint_range(0.0, 1.0) = 0.65;
+uniform float street_mid_soft : hint_range(0.01, 0.4) = 0.1;
+// how much the lines thin in the middle (light added; ~0.5 clears them)
+uniform float street_line_lift : hint_range(0.0, 1.0) = 0.4;
+// how much the cobbles flatten there (1 = no relief, no joints, no wear)
+uniform float street_cobble_fade : hint_range(0.0, 1.0) = 1.0;
+// the generated distance-to-the-nearest-wall map (wb1_street_centre.py; R = metres / Wall Map Range). Same placement
+// as the Street Centre Map. Also used by Wall Skirt. Unset = far from every wall.
+uniform sampler2D wall_distance_map : hint_default_white, filter_linear, repeat_disable;
+uniform float wall_map_range : hint_range(1.0, 50.0) = 12.0;
+// EXPONENTIAL WALL FADE (Orion: exponentially darker next to the building): the fade is multiplied by
+// 1 - exp(-distance / Wall Falloff), so it dies steeply at the wall and is near full a few falloffs out (metres;
+// 0 = off, the painted map alone)
+uniform float street_wall_falloff : hint_range(0.0, 6.0) = 1.5;
+// HER SHADOW (Orion: the character's shadow must still show): the shadow map can't tell her shadow from a building's.
+// Keep Cast Shadows: 1 = no fade inside ANY cast shadow (hers kept whole -- but building shadows across the middle keep
+// their lines too); 0 = shadows fade like the rest.
+uniform float street_keep_cast_shadows : hint_range(0.0, 1.0) = 0.0;
+// Shadow Edge: the fade is cancelled along the EDGES of cast shadows, so every shadow -- hers too -- keeps an inked
+// outline even in the faded middle (1 = full outline; its width follows the shadow's softness)
+uniform float street_shadow_edge : hint_range(0.0, 1.0) = 1.0;
+// HER SHADOW UNDER HER (11 Oct 2026, Orion: Street Centre is a great tool, but the shadow under the player must stay).
+// The shader works out her shadow's footprint -- a strip from her feet, away from the sun, as long as her height
+// throws at this sun angle -- and inside it the cast shadow keeps its line work. Building shadows elsewhere still fade.
+// Her position comes from district1_setup.gd every frame (run time only; in the editor nothing changes).
+// 1 = her shadow printed in full, 0 = it fades like the rest
+uniform float street_keep_hero_shadow : hint_range(0.0, 1.0) = 1.0;
+// her height in metres (sets how long her shadow is) and half the strip's width
+uniform float street_hero_height : hint_range(0.3, 4.0) = 1.55;
+uniform float street_hero_shadow_width : hint_range(0.1, 3.0) = 0.7;
+// KEEP THE TONE PLATE (11 Oct 2026, Orion: at 18:00 the cleared middle of the street was still bright paper-white,
+// which made no sense with a low sun -- Street Centre should bring the street to the tone plate, and only sunlight
+// should push it brighter). The tone plate ignores Street Centre's Line Lift: the cleared middle loses its lines but
+// keeps the tone plate's mid-tone, and turns cream only where the real light passes the Tone Cut Level.
+// 1 = the tone plate sees the street's own light only, 0 = it sees the lift too (paper-white middle, as before).
+// Needs the Tone Plate on.
+uniform float street_keep_tone : hint_range(0.0, 1.0) = 1.0;
+group_uniforms;
+
+// WALL SKIRT (11 Oct 2026, Orion: woodcuts carry a little texture out from the foot of a building, fading quickly, even
+// in sunlight -- it shows the flat ground underneath). Level ground near a wall takes light off along an exponential:
+// full at the wall, ~1/3 at Falloff metres, almost gone at 3 x Falloff. Uses the Wall Distance Map (Street Centre).
+group_uniforms Terrain_Wall_Skirt;
+// Wall Skirt: a band of line work at the foot of every wall, fading out (settings below).
+uniform bool use_wall_skirt = false;
+// light taken off right at the wall (waterline units: ~0.3 swells the lines, ~0.8 inks it solid)
+uniform float wall_skirt_strength : hint_range(0.0, 1.5) = 0.35;
+// metres for it to fall to about a third
+uniform float wall_skirt_falloff : hint_range(0.05, 5.0) = 0.8;
+// the same inside cast shadows (blends with the shadow map; already dark there, so often less is wanted)
+uniform float wall_skirt_shadow : hint_range(0.0, 1.5) = 0.2;
+group_uniforms;
+
+// MAP RANGE - the workhorse. Reshapes luminance before thresholding.
+// -------------------------------------------------------------
+//  TONAL GRADIENT
+//  A vertical (or horizontal) ramp added to luminance, independent
+//  of any light. This is how a backdrop gets denser toward the
+//  ground without a lamp having to be responsible for it.
+//
+//  Assign a GradientTexture1D and draw the falloff by hand. Mid
+//  grey (0.5) is neutral, darker adds ink, lighter removes it.
+//  Sampled in SCREEN space, so it stays put as the scene moves.
+// -------------------------------------------------------------
+group_uniforms Tonal_Gradient;
+// Tonal gradient: a GradientTexture1D across the screen (mid grey = neutral, darker adds ink, lighter removes it).
+uniform sampler2D grad_tex : hint_default_white, filter_linear;
+// How strongly the tonal gradient shifts the luminance.
+uniform float grad_amount : hint_range(-2.0, 2.0) = 0.0;
+// The tonal gradient runs left-right (on) or top-bottom (off).
+uniform bool grad_horizontal = false;
+group_uniforms;
+
+// -------------------------------------------------------------
+//  VILLAIN SHADOW (12 Oct 2026, Orion: "the creature only exists as a shadow of pattern lines")
+//  A villain (the Shadow Teen) is never drawn -- only its shadow, and that shadow is pattern lines even on a Flat
+//  street. It comes from its own marker light (a magenta spotlight, villain_shadow.gd) that only the villain casts
+//  shadows for; this shader spots that light, adds none of its light, and inks lines where the villain's shadow
+//  falls. Spotlights are drawn after the sun and the lamps, so the lines print over everything.
+// -------------------------------------------------------------
+group_uniforms Villain_Shadow;
+// Draw villain shadows on this material (the ground, the walls -- anything a villain's shadow can fall on).
+uniform bool use_villain_shadow = true;
+// Surface's Own Shadow = the creature's shadow looks like this surface's own shadow (its own lines); a Flat surface
+// draws it with Villain Flat Pattern. Villain Lines = the villain's own flickering lines (the settings below).
+uniform int villain_style : hint_enum("Surface's Own Shadow,Villain Lines") = 0;
+// On a Flat surface (the street), the pattern the creature's shadow is drawn in (the surface's other pattern settings apply).
+uniform int villain_flat_pattern : hint_enum("Lines,Sinusoid,Parabolic,Rings,Spokes") = 0;
+// The creature's shadow keeps its lines in the middle of the street (Street Centre would clear them to paper).
+uniform bool villain_ignore_street_centre = true;
+// On a Flat surface: the creature's line spacing, x the surface's own Wave Scale (lower = wider lines).
+uniform float villain_flat_scale : hint_range(0.05, 2.0) = 0.35;
+// On a Flat surface: the Tone Plate also prints in the creature's shadow (on = a plain grey shadow like the
+// buildings'; off = lines only).
+uniform bool villain_flat_tone_plate = false;
+// How strongly it prints (1 = fully). Ragged edge and Flicker Rate (the edge's re-chew) apply in both styles;
+// the rest below are Villain Lines only.
+// How dark the lines print (0 = invisible, 1 = full ink).
+uniform float villain_darkness : hint_range(0.0, 1.0) = 1.0;
+// Lines per metre.
+uniform float villain_line_density : hint_range(0.5, 40.0) = 14.0;
+// Line thickness (0 = hairlines, 1 = solid shadow).
+uniform float villain_line_width : hint_range(0.0, 1.0) = 0.5;
+// Line angle in degrees, on the surface (ground: in the street plan; walls: 0 = level lines).
+uniform float villain_line_angle : hint_range(-180.0, 180.0) = 35.0;
+// How much the lines wander (a noise bend along each line).
+uniform float villain_wobble : hint_range(0.0, 2.0) = 0.6;
+// The lines jump to a new place this many times a second (0 = still) -- the menace.
+uniform float villain_flicker_rate : hint_range(0.0, 24.0) = 6.0;
+// How far each jump moves the lines (0 = no jump, 1 = a whole line spacing).
+uniform float villain_flicker : hint_range(0.0, 1.0) = 0.35;
+// A ragged, chewed outline (0 = the shadow map's own edge).
+uniform float villain_edge_ragged : hint_range(0.0, 1.0) = 0.4;
+// TENDRILS (19 Oct 2026, Orion: the edge fringe as part of the villain itself -- "the sinusoid tendrils shape being shown in
+// the expanding pattern lines format of the woodcut shader", keeping the villain flat on the wall, derived from the wall's
+// shading). Surface's Own Shadow only: past the shadow's edge the surface's OWN ink lines carry on into the light, each by
+// a length that rises and falls along the edge like a sinusoid and drifts. They reach into the marker light's soft shadow
+// edge, so a softer villain light (its Size / Blur) lets them reach farther. How far (0 = off, 1 = the whole soft edge).
+uniform float villain_tendrils : hint_range(0.0, 1.0) = 0.0;
+// tendril waves per metre along the edge
+uniform float villain_tendril_count : hint_range(0.2, 20.0) = 3.0;
+// how uneven their lengths are (0 = an even sinusoid)
+uniform float villain_tendril_vary : hint_range(0.0, 1.0) = 0.5;
+// how fast they creep along the edge (waves a second)
+uniform float villain_tendril_speed : hint_range(0.0, 3.0) = 0.25;
+group_uniforms;
+
+// ---- SURFACE PAPER (16 Oct 2026, from the BLOCK PRINT experiment, Orion: the watercolour paper fixed to each surface, so
+// it doesn't slide as you walk like the screen Scan does, and far away every piece reads as its own sheet). One sheet per
+// PANEL (the Deckle sets' panel UVs, like Labels), or sheets laid by world position (World Sheets: the ground, sets
+// without panel UVs). Each sheet: its own cut of the scan (shifted, turned) and its own paper tone. Off = unchanged.
+group_uniforms Surface_Paper;
+uniform bool use_surface_paper = false;
+// the tileable scan crop (res://surface_paper/surface_paper.png: grey, mean 0.5)
+uniform sampler2D bp_paper_tex : hint_default_white, filter_linear_mipmap_anisotropic, repeat_enable;
+// how many metres one tile of the scan covers (bigger = coarser fibres)
+uniform float bp_paper_m : hint_range(0.05, 10.0) = 0.8;
+// how strongly the fibres show on the paper (and the tone plate) / in the ink (light fibres catching through)
+uniform float bp_paper_on_paper : hint_range(0.0, 1.0) = 0.35;
+uniform float bp_paper_on_ink : hint_range(0.0, 1.0) = 0.15;
+// SHEETS: each one a little lighter / darker (Tone Var) and warmer / cooler (Warm Var) -- how separate pieces read far away
+uniform float bp_sheet_tone_var : hint_range(0.0, 0.3) = 0.06;
+uniform float bp_sheet_warm_var : hint_range(0.0, 0.2) = 0.03;
+// World Sheets: lay sheets by world position instead of one per panel (for surfaces without panel UVs)
+uniform bool bp_world_sheets = false;
+// World Sheets: sheet size (metres)
+uniform float bp_sheet_m : hint_range(0.2, 20.0) = 2.5;
+// World Sheets: a darker edge round each sheet (0 = none) and its width (metres)
+uniform float bp_sheet_edge : hint_range(0.0, 0.5) = 0.0;
+uniform float bp_sheet_edge_m : hint_range(0.01, 1.0) = 0.06;
+group_uniforms;
+
+// Rodrigues rotation of a vector about an arbitrary axis.
+// ---- SCRIPT DRIVEN (11 Oct 2026, Orion: values the scripts write at run time stay out of the controls).
+// district1_setup.gd / the stop-motion clock set these while the game runs; leave them at their defaults.
+group_uniforms Script_Driven_Do_Not_Edit;
+// FLICKER GATE (10 Oct 2026, Orion: flicker only at night, after 7 pm). Multiplies Flicker Amount.
+// district1_setup.gd writes it at run time from the clock (Stop Motion > Flicker Hours: From / Until) -- leave it at 1
+// here; in the editor the lamps flicker whenever they are lit, as before.
+uniform float flicker_gate : hint_range(0.0, 1.0) = 1.0;
+// POSITIONAL OWN LIGHT (11 Oct 2026): spot / omni lights (the lantern) add only their own light -- see the note at the
+// lum line in light(). district1_setup.gd sets it at run time; leave it off in the .tres.
+uniform bool positional_own_light = false;
+// NIGHT BY THE CLOCK (11 Oct 2026, Orion: "night time" tunable by hour). How far into night it is, 0 = day .. 1 = full
+// night, used by Internal At Night instead of the Sun's energy. district1_setup.gd writes it at run time from the
+// clock (Internal Light Hours); -1 (the default) = follow the Sun's energy as before. Leave it at -1 here.
+uniform float internal_night = -1.0;
+// NIGHT LIGHTS BY THE CLOCK (14 Oct 2026, Orion: "turn these on about 6 pm"): how far on the night lights are, 0..1,
+// written by district1_setup.gd from its Night Lights Hours; -1 (default) = follow the Sun's energy as before.
+uniform float night_lights_gate = -1.0;
+// where the hero stands (world metres), written every frame by district1_setup.gd for Street Centre's Keep Hero
+// Shadow -- far away = no hero. Not for hand tuning.
+uniform vec3 hero_position = vec3(0.0, -100000.0, 0.0);
+// 1 while the hero carries a lit lantern (in hand, shutter open), written by district1_setup.gd. Not for hand tuning.
+uniform float hero_lamp_carried = 0.0;
+// 1 while the hero stands in sunlight, 0 in a building's shade (rays to the sun), written by district1_setup.gd.
+// Keep Hero Shadow works only while she's in the sun. Not for hand tuning.
+uniform float hero_in_sun = 1.0;
+// her two feet (world metres), written every frame by district1_setup.gd for the Foot Shadow Dots. Not for hand tuning.
+uniform vec3 hero_foot_l = vec3(0.0, -100000.0, 0.0);
+// the street's height under every point (metres, a map baked by district1_setup.gd at the start) for Evening Walls.
+// Not for hand tuning.
+uniform sampler2D ground_height_map : hint_default_black, filter_linear, repeat_disable;
+uniform vec2 ground_height_origin = vec2(0.0);
+uniform vec2 ground_height_size = vec2(1.0);
+uniform float ground_height_ready = 0.0;
+uniform vec3 hero_foot_r = vec3(0.0, -100000.0, 0.0);
+// her heading on the ground (x, z), written by district1_setup.gd. Not for hand tuning.
+uniform vec2 hero_forward = vec2(0.0, 1.0);
+// her toe tips (world metres), written by district1_setup.gd for the foot-shaped shadow. Not for hand tuning.
+uniform vec3 hero_toe_l = vec3(0.0, -100000.0, 0.0);
+uniform vec3 hero_toe_r = vec3(0.0, -100000.0, 0.0);
+// the villain light (Villain Shadow): where it is, which way it points, the cosine of its cone's half angle. Written by
+// villain_shadow.gd every frame; far away = no villain. Not for hand tuning.
+uniform vec3 villain_light_pos = vec3(0.0, -100000.0, 0.0);
+uniform vec3 villain_light_dir = vec3(0.0, -1.0, 0.0);
+uniform float villain_cone_cos = 0.9;
+// the Sun's colour x energy (as LIGHT_COLOR gives it), for the Surface's Own Shadow pass. Written by villain_shadow.gd.
+uniform vec3 villain_sun_color = vec3(3.14159, 3.14159, 3.14159);
+// VILLAIN SHADOW LIGHT (19 Oct 2026, Orion: "the shadow on the wall needs to be formed from the wall's woodcut shader
+// linework ... the pattern lines thickening where the shadow is"). When a LAMP casts the villain: how much of the lamp still
+// reaches inside its shadow. 0 = full shade (solid ink at night); higher = the surface's own lines just thicken there.
+// (A sun-cast villain is unchanged: drawn as the surface in full shade.)
+uniform float villain_shadow_light : hint_range(0.0, 1.0) = 0.25;
+// the lamp casting the villain: its range (0 = the sun casts it) and attenuation. Written by villain_shadow.gd.
+uniform float villain_lamp_range = 0.0;
+uniform float villain_lamp_decay = 1.0;
+// the four HELD camera positions for Coarsen Plate Step (world metres), moved at staggered times by district1_setup.gd;
+// far away = not held (live). Not for hand tuning.
+// (four separate uniforms: Godot allows no default values on a uniform array)
+uniform vec3 coarsen_plate_cam_0 = vec3(0.0, -100000.0, 0.0);
+uniform vec3 coarsen_plate_cam_1 = vec3(0.0, -100000.0, 0.0);
+uniform vec3 coarsen_plate_cam_2 = vec3(0.0, -100000.0, 0.0);
+uniform vec3 coarsen_plate_cam_3 = vec3(0.0, -100000.0, 0.0);
+// each held position's PREVIOUS place (for the crossfade's fade-in), and how far each one is into its fade-out before
+// its next re-lay / its fade-in after the last one (x..w = positions 0..3). Written by district1_setup.gd.
+uniform vec3 coarsen_plate_prev_0 = vec3(0.0, -100000.0, 0.0);
+uniform vec3 coarsen_plate_prev_1 = vec3(0.0, -100000.0, 0.0);
+uniform vec3 coarsen_plate_prev_2 = vec3(0.0, -100000.0, 0.0);
+uniform vec3 coarsen_plate_prev_3 = vec3(0.0, -100000.0, 0.0);
+uniform vec4 coarsen_plate_dip_before = vec4(0.0);
+uniform vec4 coarsen_plate_dip_after = vec4(0.0);
+// written by the Stop Motion clock every step -- not for hand tuning
+uniform float boil_step = 0.0;
+group_uniforms;
+
+// =============================================================
+//  VARYINGS
+//  light() has no VERTEX, so both coordinate spaces are captured
+//  in vertex() and carried through.
+// =============================================================
+varying vec3 v_obj;   // model space
+varying vec3 v_view;  // view space
+varying vec3 v_obj_n; // model-space normal, for obj_box_projection (9 Oct 2026)
+// PANELS (10 Oct 2026): district building sets carry per-panel UVs from the exporter. UV = the panel's own flat
+// coordinates in metres, centred on the panel (glTF flips V, undone here); UV2.x = a random number per panel.
+varying vec2 v_panel;
+varying vec2 v_pseed;
+// Bias Lid: which eye this mesh is, +1 = the character's LEFT, -1 = RIGHT, 0 = not an
+// eye / unknown (full lid). Set per mesh by joan_setup.gd; carried to light() below.
+instance uniform float lid_side = 0.0;
+varying flat float v_lid_side;
+
+vec3 rot_axis(vec3 v, vec3 axis, float ang) {
+	float s = sin(ang);
+	float c = cos(ang);
+	return v * c + cross(axis, v) * s + axis * dot(axis, v) * (1.0 - c);
+}
+
+// Turn T so the next step lands ON the sphere rather than inside
+// it, leaving the step length alone. Returns T untouched when the
+// step is already clear, which is the overwhelming majority of them.
+vec3 deflect(vec3 P, vec3 T, float seg, vec4 sph, float margin) {
+	if (sph.w <= 0.0) return T;
+	vec3 d = (P + T * seg) - sph.xyz;
+	float r = sph.w + margin;
+	float l = length(d);
+	if (l >= r || l < 0.000001) return T;
+	vec3 n = d / l;
+	// drop the component heading inward, then climb back out to the
+	// surface over this one step. Both terms are directions: the
+	// magnitude of the step is set by seg, not by this.
+	vec3 t = T - n * min(dot(T, n), 0.0) + n * ((r - l) / max(seg, 0.000001));
+	return normalize(t);
+}
+
+void vertex() {
+	// Captured BEFORE any taper, on purpose. The pattern coordinate
+	// stays in the strip's undeformed space, so hatching keeps even
+	// spacing all the way to the tip instead of crowding as the
+	// geometry narrows.
+	v_lid_side = lid_side;
+	v_obj  = VERTEX;
+	if (pattern_rest_anchor) {
+		v_obj = CUSTOM0.xyz;                  // the rest-pose position (exporter's UV3 / UV4)
+	}
+	v_obj_n = NORMAL;
+	v_panel = vec2(UV.x, 1.0 - UV.y);
+	v_pseed = UV2;
+	if (obj_compensate_node_scale) {
+		// column lengths of the model matrix are the node's scale
+		v_obj *= vec3(length(MODEL_MATRIX[0].xyz),
+		              length(MODEL_MATRIX[1].xyz),
+		              length(MODEL_MATRIX[2].xyz));
+	}
+
+	// Width first - a property of the cross-section - and taper then
+	// narrows whatever width it was given.
+	//
+	// BOTH act on X AND Z, which makes one code path serve flat
+	// cards and tubes alike: a flat card has z = 0, so scaling z
+	// does nothing to it, while a tube scales radially and stays
+	// round instead of being squashed into an ellipse.
+	VERTEX.xz *= strand_width;
+
+	float taper_k = 1.0;
+	if (use_strip_taper) {
+		float t = clamp(VERTEX.y / max(strip_height, 0.0001), 0.0, 1.0);
+		if (use_taper_profile) {
+			// the curve's value IS the width at this height
+			taper_k = texture(taper_profile, vec2(t, 0.5)).r;
+		} else {
+			taper_k = mix(1.0, tip_width, pow(t, taper_curve));
+		}
+		VERTEX.xz *= taper_k;
+	}
+
+	// On a TUBE, tapering turns the cylinder into a cone, and a cone's
+	// surface normal tilts toward the tip by the cone half-angle.
+	// Without this a tapered tube keeps shading like a straight
+	// cylinder, which reads as a stuck-on highlight rather than a
+	// narrowing form. Harmless on a flat card, where the radial
+	// component is zero.
+	if (use_strip_taper && use_cone_normals) {
+		float slope = (1.0 - tip_width) / max(strip_height, 0.0001);
+		NORMAL = normalize(NORMAL + vec3(0.0, slope * taper_curve, 0.0)
+		                   * length(NORMAL.xz));
+	}
+
+	// AFTER the taper and the cone normals, BEFORE the bend. After the
+	// taper because flatten squashes whatever width the taper left.
+	// Before the bend because the bend rotates the frame that carries
+	// this corrected normal - do it afterwards and the flattening
+	// would be applied along the strand's original axes rather than
+	// along the ones it actually curved into.
+	if (flatten > 0.0) {
+		float tf = clamp(VERTEX.y / max(strip_height, 0.0001), 0.0, 1.0);
+		// 1.0 at the tip, (1 - flatten) at the root. Floored so a
+		// fully flattened base keeps a sliver of thickness rather
+		// than collapsing to a plane and taking its normal with it.
+		float f = max(mix(1.0 - flatten, 1.0, pow(tf, flatten_falloff)), 0.05);
+		VERTEX.z *= f;
+		// inverse transpose: scaling a surface by f along an axis
+		// scales its normal by 1/f along that axis
+		NORMAL = normalize(vec3(NORMAL.x, NORMAL.y, NORMAL.z / f));
+	}
+
+	if (use_strip_bend || use_head_collide) {
+		// ARC-LENGTH PRESERVING BEND.
+		//
+		// Rotating each vertex about the root by an angle that grows
+		// with height does NOT bend a strand - it spirals it, and it
+		// stretches by sqrt(1 + y^2 * dtheta^2). At small angles the
+		// error hides; past a few degrees the hair visibly grows.
+		//
+		// Instead, walk a frame up the strand, turning it by the
+		// LOCAL rate at each step and advancing by a fixed arc
+		// length. Length is then correct by construction, whatever
+		// the bend, wave and curl are doing.
+		float t = clamp(VERTEX.y / max(strip_height, 0.0001), 0.0, 1.0);
+		vec3 local = VERTEX;
+		vec3 local_n = NORMAL;
+
+		vec3 T = vec3(0.0, 1.0, 0.0);   // tangent, up the strand
+		vec3 N = vec3(0.0, 0.0, 1.0);   // face normal
+		vec3 B = vec3(1.0, 0.0, 0.0);   // across the width
+		vec3 P = vec3(0.0);
+
+		// UNSTEERED reference path. Integrated alongside the real one
+		// and turned only by the bend, so the difference between the
+		// two is exactly how far the clump steering has moved this
+		// strand - which is what tells the loop how much gap is left.
+		bool do_clump = (clump_amount != 0.0) && (INSTANCE_CUSTOM.a > 0.0);
+		vec3 Tu = T;
+		vec3 Pu = P;
+		vec3 d0 = (INSTANCE_CUSTOM.rgb * 2.0 - 1.0) * INSTANCE_CUSTOM.a;
+
+		const int BEND_STEPS = 16;
+		float du = t / float(BEND_STEPS);
+		float seg = du * strip_height;
+		// Zeroed when the bend is off, so collision can run on a strand
+		// that is only being aimed by the bake. With no turn the loop
+		// integrates a straight line and reproduces VERTEX exactly, so
+		// enabling collision alone costs shape nothing.
+		float A = use_strip_bend ? radians(bend_angle) : 0.0;
+		float W = use_strip_bend ? radians(wave_amount) : 0.0;
+		// per-strand phase from the bake, plus the node-wide offset.
+		// An instance uniform is per NODE, so on its own every strand
+		// in a zone waves in lockstep and the head reads as
+		// corrugated metal. COLOR.a carries the per-strand value.
+		float phase = COLOR.a + wave_phase;
+
+		// --- colliders, resolved into THIS STRAND's space -------------
+		// Done once, outside the loop. MODEL_MATRIX on a MultiMesh
+		// already carries the instance transform, so this resolves per
+		// strand without anything being baked.
+		vec4 sp_scalp = vec4(0.0);
+		vec4 sp1 = vec4(0.0);
+		vec4 sp2 = vec4(0.0);
+		vec4 sp3 = vec4(0.0);
+		float marg = 0.0;
+
+		if (use_head_collide) {
+			// uniform by v29's contract - the bake scales length on all
+			// three axes precisely so this holds
+			float iscale = max(length(MODEL_MATRIX[1].xyz), 0.000001);
+
+			// The spine is the CENTRELINE. The card's own half width has
+			// to clear too, or its faces poke through while the spine
+			// sits politely on the surface.
+			marg = collide_margin / iscale + max(abs(local.x), abs(local.z));
+
+			if (scalp_sphere_radius > 0.0) {
+				vec3 rn = normalize(COLOR.rgb * 2.0 - 1.0);
+				float Rl = scalp_sphere_radius / iscale;
+				// The margin is SUBTRACTED here rather than added. This
+				// sphere passes exactly through the root, so an inflated
+				// one would find every root already inside it and lift the
+				// whole head of hair off the scalp by the margin - the
+				// hovering-root artefact, manufactured on purpose. Shrink
+				// it instead and the root sits neutrally on the boundary.
+				sp_scalp = vec4(-rn * Rl, max(Rl - marg, 0.0));
+			}
+
+			if (head_sphere_1.w > 0.0 || head_sphere_2.w > 0.0
+			    || head_sphere_3.w > 0.0) {
+				mat4 w2l = inverse(MODEL_MATRIX);
+				sp1 = vec4((w2l * vec4(head_sphere_1.xyz, 1.0)).xyz,
+				           head_sphere_1.w / iscale);
+				sp2 = vec4((w2l * vec4(head_sphere_2.xyz, 1.0)).xyz,
+				           head_sphere_2.w / iscale);
+				sp3 = vec4((w2l * vec4(head_sphere_3.xyz, 1.0)).xyz,
+				           head_sphere_3.w / iscale);
+			}
+		}
+
+		for (int i = 0; i < BEND_STEPS; i++) {
+			float u = du * (float(i) + 0.5);
+
+			// rate of turn here, not accumulated angle
+			float dth = A * bend_falloff
+			          * pow(max(u, 0.001), bend_falloff - 1.0)
+			          + W * 6.28318 * wave_count
+			            * cos((u * wave_count + phase) * 6.28318);
+			dth *= du;
+
+			// the bending axis lives in the strand's OWN frame, which
+			// is what makes curl_twist corkscrew rather than just
+			// tilting the plane
+			float d = radians(bend_direction + curl_twist * u);
+			vec3 axis = normalize(B * cos(d) + N * sin(d));
+
+			T = rot_axis(T, axis, dth);
+			N = rot_axis(N, axis, dth);
+			B = rot_axis(B, axis, dth);
+
+			// BEFORE the collision, never after. The head has to have
+			// the last word: a strand clumped into the skull is worse
+			// than one that failed to join its lock.
+			if (do_clump) {
+				Tu = rot_axis(Tu, axis, dth);
+				Pu += Tu * seg;
+
+				float cw = pow(max(u, 0.001), clump_falloff);
+				if (use_clump_profile) {
+					cw = texture(clump_profile, vec2(u, 0.5)).r * 2.0 - 1.0;
+				}
+
+				// where the guide is NOW, less where this strand has
+				// already got to
+				vec3 rem = d0 + Pu - P;
+				vec3 lat = rem - T * dot(rem, T);
+				float gap = length(lat);
+
+				if (gap > 0.000001) {
+					float want = radians(clump_amount) * cw * du;
+					// never turn further than pointing straight at the
+					// target. Without this cap a strand that has
+					// arrived keeps turning, crosses over and starts
+					// oscillating around its own guide.
+					float mag = min(abs(want), atan(gap / max(seg, 0.000001)));
+					vec3 cax2 = normalize(cross(T, lat));
+					float ang2 = mag * sign(want);
+					T = rot_axis(T, cax2, ang2);
+					N = rot_axis(N, cax2, ang2);
+					B = rot_axis(B, cax2, ang2);
+				}
+			}
+
+			if (use_head_collide) {
+				vec3 Tc = deflect(P, T,  seg, sp_scalp, 0.0);
+				Tc      = deflect(P, Tc, seg, sp1, marg);
+				Tc      = deflect(P, Tc, seg, sp2, marg);
+				Tc      = deflect(P, Tc, seg, sp3, marg);
+
+				// Rotate the WHOLE frame by the correction, for exactly the
+				// reason v23 rotates NORMAL: a strand that slid along the
+				// skull but kept its old normal would shade as though it had
+				// never touched it, and in a two-value shader that reads as
+				// a stroke belonging to the wrong form.
+				vec3 cax = cross(T, Tc);
+				float cl = length(cax);
+				if (cl > 0.000001) {
+					cax /= cl;
+					float cang = atan(cl, dot(T, Tc));
+					N = rot_axis(N, cax, cang);
+					B = rot_axis(B, cax, cang);
+					T = Tc;
+				}
+			}
+
+			P += T * seg;
+		}
+
+		VERTEX = P + B * local.x + N * local.z;
+		NORMAL = normalize(B * local_n.x + T * local_n.y + N * local_n.z);
+	}
+
+	// After the bend, so the bend's own normal rotation is what gets
+	// blended rather than the undeformed card's.
+	if (use_root_normal) {
+		vec3 rn = normalize(COLOR.rgb * 2.0 - 1.0);
+		NORMAL = normalize(mix(NORMAL, rn, root_normal_blend));
+	}
+
+	// after taper and bend, so this is the real position on screen
+	v_view = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+// =============================================================
+//  HELPERS
+// =============================================================
+float remap(float v, float a, float b, float c, float d) {
+	return c + (v - a) * (d - c) / max(b - a, 0.0001);
+}
+
+// Hashes with good distribution. The naive fract(p.x * p.y) form
+// correlates badly once one input is near-constant, which shows up
+// as regular stripes rather than noise.
+float hash21(vec2 p) {
+	vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+	p3 += dot(p3, p3.yzx + 33.33);
+	return fract((p3.x + p3.y) * p3.z);
+}
+
+// 3D version. Needed wherever a hash runs on a SURFACE in space:
+// hashing only two axes extrudes the field along the third, so a
+// figure picks up columns of identical grit running through it.
+float hash31(vec3 p) {
+	vec3 p3 = fract(p * 0.1031);
+	p3 += dot(p3, p3.zyx + 31.32);
+	return fract((p3.x + p3.y) * p3.z);
+}
+
+// Takes DEGREES, so every angle uniform reads in degrees.
+vec2 rotate2d(vec2 p, float deg) {
+	float a = radians(deg);
+	float s = sin(a);
+	float c = cos(a);
+	return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+// v36: the lid / bias-lobe frame: the obj_axis pair plus its third axis
+// (XY -> -Z, which is Blender's +Y; XZ -> Y; ZY -> X). Its own inverse.
+vec3 lid_frame(vec3 m) {
+	return obj_axis == 1 ? vec3(m.x, m.z, m.y)
+	     : obj_axis == 2 ? vec3(m.z, m.y, m.x)
+	     : vec3(m.x, m.y, -m.z);
+}
+
+// v36: Cut Curve. Height on the eyeball (q in eyeball radii, lid frame) as a
+// latitude about the eye's up axis tipped by cut_curve degrees toward the
+// eye's front/back, so equal heights bow across the eye instead of running flat.
+// On a sphere the tipped latitude drops by x^2 / (2 * depth) away from the
+// centre line; using that bow directly (not the mesh's own depth, which is not
+// exactly on the lid sphere) keeps the line pinned at the eye's middle, so
+// only its ends bend. + = ends curl UP (a smile, like the lower lid).
+float cut_lat(vec3 q) {
+	float zc = sqrt(max(1.0 - q.y * q.y, 0.09));
+	return q.y - sin(radians(cut_curve)) * 0.5 * q.x * q.x / zc;
+}
+
+// v36: cross product under another name -- light() has a local float called
+// `cross` (the cross-hatch arm) that hides the built-in there.
+vec3 lid_cross(vec3 a, vec3 b) {
+	return cross(a, b);
+}
+
+// v36: hash vec3 -> vec3 in 0..1, for the procedural Voronoi below.
+vec3 hash33(vec3 p) {
+	vec3 p3 = fract(p * vec3(0.1031, 0.1030, 0.0973));
+	p3 += dot(p3, p3.yxz + 33.33);
+	return fract((p3.xxy + p3.yxx) * p3.zyx);
+}
+
+// v36: signed 3D gradient (Perlin) noise, about -1..1, quintic fade --
+// the same family as Blender's noise_perlin (scaled the way its 3D
+// snoise is). Used by blender_noise_fbm below.
+float perlin3(vec3 p) {
+	vec3 i = floor(p);
+	vec3 f = p - i;
+	vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+	float n = 0.0;
+	float v[8];
+	for (int c = 0; c < 8; c++) {
+		vec3 o = vec3(float(c & 1), float((c >> 1) & 1), float((c >> 2) & 1));
+		vec3 gdir = normalize(hash33(i + o) * 2.0 - 1.0 + 0.0001);
+		v[c] = dot(gdir, f - o);
+	}
+	float x00 = mix(v[0], v[1], u.x), x10 = mix(v[2], v[3], u.x);
+	float x01 = mix(v[4], v[5], u.x), x11 = mix(v[6], v[7], u.x);
+	return mix(mix(x00, x10, u.y), mix(x01, x11, u.y), u.z) * 1.4;
+}
+
+// v36: Blender's Noise Texture (FBM, normalised, 3D): Distortion first
+// offsets the coordinate by three decorrelated noise samples, then
+// int(detail)+1 octaves at lacunarity 2, roughness 0.5, mapped 0..1.
+float blender_noise_fbm(vec3 p, float detail, float distortion) {
+	if (distortion != 0.0) {
+		p += vec3(perlin3(p + vec3(113.7, 157.3, 191.1)),
+		          perlin3(p + vec3(171.9, 103.1, 137.7)),
+		          perlin3(p + vec3(149.3, 181.7, 127.9))) * distortion;
+	}
+	float sum = 0.0, amp = 1.0, maxamp = 0.0, fs = 1.0;
+	int oct = int(floor(detail));
+	for (int k = 0; k <= 8; k++) {
+		if (k > oct) break;
+		sum += perlin3(p * fs) * amp;
+		maxamp += amp;
+		amp *= 0.5;
+		fs *= 2.0;
+	}
+	return clamp(0.5 * sum / max(maxamp, 0.0001) + 0.5, 0.0, 1.0);
+}
+
+// NOISE PIXEL LOD (18 Oct 2026, Orion: following her from behind "the clothing buzzes with constant noise", camera
+// still): blender_noise_fbm with every octave finer than min_px screen pixels left out (the last one blended in by its
+// fraction, as Blender does), measured on the coordinate AFTER the distortion warp -- the warp shrinks the cells far
+// below what Scale suggests. Sub-pixel octaves land on a different random value every frame the surface moves on
+// screen (she walks), which is the buzz. When even the first octave is below min_px the field fades to its mean.
+float blender_noise_fbm_lod(vec3 p, float detail, float distortion, float min_px) {
+	if (distortion != 0.0) {
+		p += vec3(perlin3(p + vec3(113.7, 157.3, 191.1)),
+		          perlin3(p + vec3(171.9, 103.1, 137.7)),
+		          perlin3(p + vec3(149.3, 181.7, 127.9))) * distortion;
+	}
+	float upp = max(length(dFdx(p)), length(dFdy(p)));             // noise cells per pixel
+	float kmax = log2(1.0 / max(upp, 0.000001) / max(min_px, 0.01)); // octaves whose cells stay min_px or more
+	float fade = clamp(kmax + 1.0, 0.0, 1.0);
+	float d = clamp(min(detail, kmax), 0.0, 8.0);
+	float sum = 0.0, amp = 1.0, maxamp = 0.0, fs = 1.0;
+	int oct = int(floor(d));
+	for (int k = 0; k <= 8; k++) {
+		if (k > oct) break;
+		sum += perlin3(p * fs) * amp;
+		maxamp += amp;
+		amp *= 0.5;
+		fs *= 2.0;
+	}
+	float v = sum / max(maxamp, 0.0001);
+	float rmd = d - floor(d);
+	if (rmd > 0.001) {
+		v = mix(v, (sum + perlin3(p * fs) * amp) / (maxamp + amp), rmd);
+	}
+	return mix(0.5, clamp(0.5 * v + 0.5, 0.0, 1.0), fade);
+}
+
+// v36: Voronoi DISTANCE TO EDGE, 3D, the same algorithm as Blender's
+// Voronoi Texture node (feature Distance to Edge; the distance metric
+// does not apply to it). Two passes: find the nearest feature point,
+// then the distance to the nearest bisector plane. Statistically the
+// same field as the Blender port's Paper Tooth; the cells themselves
+// differ because the hash differs.
+float voronoi_edge3(vec3 coord, float randomness) {
+	vec3 cell = floor(coord);
+	vec3 local = coord - cell;
+	vec3 to_closest = vec3(0.0);
+	float min_d = 8.0;
+	for (int k = -1; k <= 1; k++)
+	for (int j = -1; j <= 1; j++)
+	for (int i = -1; i <= 1; i++) {
+		vec3 off = vec3(float(i), float(j), float(k));
+		vec3 v = off + hash33(cell + off) * randomness - local;
+		float dd = dot(v, v);
+		if (dd < min_d) {
+			min_d = dd;
+			to_closest = v;
+		}
+	}
+	float edge = 8.0;
+	for (int k = -1; k <= 1; k++)
+	for (int j = -1; j <= 1; j++)
+	for (int i = -1; i <= 1; i++) {
+		vec3 off = vec3(float(i), float(j), float(k));
+		vec3 v = off + hash33(cell + off) * randomness - local;
+		vec3 perp = v - to_closest;
+		if (dot(perp, perp) > 0.0001) {
+			edge = min(edge, dot((to_closest + v) * 0.5, normalize(perp)));
+		}
+	}
+	return edge;
+}
+
+// One hatch branch: sine ridges along X of the (rotated) coordinate.
+float hatch(vec2 coord, float scale, float angle, float wob) {
+	vec2 p = rotate2d(coord, angle);
+	return sin((p.x + wob) * scale) * 0.5 + 0.5;
+}
+
+// -------------------------------------------------------------
+//  PATTERN GENERATORS
+//  All return 0..1 terrain. Ridges near 1 are ink potential.
+// -------------------------------------------------------------
+
+// Lines that swing sideways as they travel.
+float pat_sinusoid(vec2 p, float wob, float scale) {
+	p.x += sin(p.y * sine_freq) * sine_amp;
+	return sin((p.x + wob) * scale) * 0.5 + 0.5;
+}
+
+// Lines bowed into parabolas. Gentler than a sinusoid, no repeat.
+float pat_parabolic(vec2 p, float wob, float scale) {
+	// normalised by span, and expressed in LINE WIDTHS, so the dial
+	// means the same thing at any coordinate range or density
+	float span = max(parabola_span, 0.0001);
+	float y = p.y / span;
+	float k = parabola_curve * 6.28318 / max(scale, 0.0001);
+	p.x += y * y * k;
+	// the curve's lean here (dx / dy): its lines are 1 / sqrt(1 + lean^2) of the spacing apart
+	float lean = 2.0 * y * k / span;
+	float spread = mix(1.0, sqrt(1.0 + lean * lean), parabola_keep_spacing);
+	return sin((p.x + wob) * scale / spread) * 0.5 + 0.5;
+}
+
+// Concentric rings from pattern_center.
+float pat_rings(vec2 p, float wob, float scale) {
+	return sin((length(p) + wob) * scale) * 0.5 + 0.5;
+}
+
+// Radial spokes, optionally spiralled, shaped by spoke_curve.
+float pat_spokes(vec2 p, float wob) {
+	float r = length(p);
+	float a = atan(p.y, p.x) + r * spoke_twist;
+	float v = sin((a + wob) * spoke_count) * 0.5 + 0.5;
+	float t = clamp(r / max(spoke_curve_len, 0.0001), 0.0, 1.0);
+	return v * texture(spoke_curve, vec2(t, 0.0)).r;
+}
+
+// Wide-centred rays tapering to a point. Used as the glare layer.
+float pat_glare(vec2 p, float count, float len, float sharp) {
+	float r = length(p);
+	float a = atan(p.y, p.x);
+	// 0 along each ray axis, 1 midway between rays
+	float saw = abs(fract(a * count / 6.28318) * 2.0 - 1.0);
+	// angular half-width, shrinking with distance
+	float w = pow(clamp(1.0 - r / max(len, 0.0001), 0.0, 1.0), sharp);
+	return clamp(1.0 - saw / max(w, 0.0001), 0.0, 1.0);
+}
+
+// Dispatcher for the main pattern arm.
+// One generator, called for both the main arm and the cross arm,
+// so each can be a different shape at a different angle.
+float gen_pattern(int type, vec2 coord, float scale, float angle,
+                  float wob) {
+	vec2 p = rotate2d(coord - pattern_center, angle);
+	if (type == 1) { return pat_sinusoid(p, wob, scale); }
+	if (type == 2) { return pat_parabolic(p, wob, scale); }
+	if (type == 3) { return pat_rings(p, wob, scale); }
+	if (type == 4) { return pat_spokes(p, wob); }
+	return sin((p.x + wob) * scale) * 0.5 + 0.5;
+}
+
+// FLAT EDGE's lines: as gen_pattern, but its Sinusoid swings by Flat Edge Amp / Freq
+float flat_edge_pattern_at(vec2 coord, float wob, float gauge) {
+	float sc = wave_scale * gauge * flat_edge_scale;
+	if (flat_edge_pattern == 1) {
+		vec2 p = rotate2d(coord - pattern_center, line_angle);
+		p.x += sin(p.y * flat_edge_freq) * flat_edge_amp;
+		return sin((p.x + wob) * sc) * 0.5 + 0.5;
+	}
+	return gen_pattern(flat_edge_pattern, coord, sc, line_angle, wob);
+}
+
+float make_pattern(int ptype, vec2 coord, float wob, float gauge) {
+	if (ptype == 5) {                                    // FLAT: no lines, one level everywhere ...
+		return flat_level;                               // (its lined edge is added at the waterline: Flat Edge)
+	}
+	return gen_pattern(ptype, coord, wave_scale * gauge,
+	                   line_angle, wob);
+}
+
+void fragment() {
+	if (use_alpha_cutout) {
+		vec4 a = texture(alpha_tex, UV);
+		ALPHA = alpha_from_red ? a.r : a.a;
+		ALPHA_SCISSOR_THRESHOLD = alpha_threshold;
+	}
+
+	if (use_normal_map || use_expressions) {
+		// tangent-space flat: no deviation in any direction
+		const vec3 FLAT = vec3(0.5, 0.5, 1.0);
+
+		vec3 n = use_normal_map ? texture(normal_tex, UV).rgb : FLAT;
+
+		if (use_expressions) {
+			// sum deviations from flat, exactly as blend shapes sum
+			// offsets from the rest pose
+			n += (texture(expression_tex, vec3(UV, 0.0)).rgb - FLAT) * expr_0;
+			n += (texture(expression_tex, vec3(UV, 1.0)).rgb - FLAT) * expr_1;
+			n += (texture(expression_tex, vec3(UV, 2.0)).rgb - FLAT) * expr_2;
+			n += (texture(expression_tex, vec3(UV, 3.0)).rgb - FLAT) * expr_3;
+			n += (texture(expression_tex, vec3(UV, 4.0)).rgb - FLAT) * expr_4;
+			n += (texture(expression_tex, vec3(UV, 5.0)).rgb - FLAT) * expr_5;
+		}
+
+		NORMAL_MAP = n;
+		NORMAL_MAP_DEPTH = normal_depth;
+	}
+}
+
+// The object-space pattern projection (planar axis / view aligned / box / wall aligned), as a function
+// of the model-space point p. Every branch is LINEAR in p, so the same function also maps a small
+// step dp to the coordinate's change -- what the smooth moire measure needs.
+vec2 obj_project(vec3 p, vec3 on, vec3 r, vec3 u, vec3 wup, float d_az, float d_el) {
+	vec2 o = obj_axis == 1 ? p.xz
+	       : obj_axis == 2 ? p.zy
+	       : p.xy;
+	if (proj_type == 1) {
+		vec3 held = p;
+		if (plate_step > 0.00001) {
+			held = rot_axis(held, wup, d_az);
+			held = rot_axis(held, r, d_el);
+		}
+		o = vec2(dot(held, r), dot(held, u));
+	} else if (proj_type == 2) {
+		vec3 an = abs(on);
+		o = (an.y >= an.x && an.y >= an.z) ? p.xz : (an.x >= an.z) ? p.zy : p.xy;
+	}
+	if (obj_box_projection) {
+		vec3 an = abs(on);
+		o = (an.y >= an.x && an.y >= an.z) ? p.xz
+		  : (an.x >= an.z)                 ? p.zy
+		  :                                  p.xy;
+	}
+	if (obj_wall_aligned) {
+		vec3 wn = normalize(on);
+		if (abs(wn.y) > 0.995) {
+			o = p.xz;                                      // floor / flat roof
+		} else {
+			vec3 across = normalize(cross(vec3(0.0, 1.0, 0.0), wn));   // along the wall, horizontal
+			vec3 up = normalize(cross(wn, across));                   // up the wall / up the slope
+			o = vec2(dot(p, across), dot(p, up));
+		}
+	}
+	return o;
+}
+
+void light() {
+	// POSITIONAL EARLY OUT (Performance group): a lamp pass on a pixel its light does not reach does nothing at all --
+	// it used to compute the whole woodcut here and only then skip the write (Positional Own Light). The rest of
+	// light() sits inside this block (no `return` allowed in light()).
+	bool pos_dark = positional_own_light && positional_early_out && !LIGHT_IS_DIRECTIONAL && ATTENUATION <= 0.0005;
+	// VILLAIN SHADOW: the villain's marker light (pure magenta) is never woodcut-lit -- see the block at the end
+	bool villain_pass = !LIGHT_IS_DIRECTIONAL && LIGHT_COLOR.r > 0.0
+	                  && LIGHT_COLOR.g < 0.02 * LIGHT_COLOR.r && abs(LIGHT_COLOR.r - LIGHT_COLOR.b) < 0.1 * LIGHT_COLOR.r;
+	// VILLAIN SHADOW, Surface's Own Shadow (12 Oct 2026, Orion: "the shadow creatures should obey the shadow of the surface
+	// they are on"): on the villain light's pass the whole woodcut below runs again AS IF IN SHADOW (the sun's colour, no
+	// direct light; a Flat surface uses Villain Flat Pattern instead), and is laid in only inside the creature's shadow
+	// (v_mask) and only where the earlier lights left paper -- a shadow inside a shadow doesn't show.
+	bool v_surface = villain_pass && villain_style == 0 && use_villain_shadow && villain_light_pos.y > -50000.0
+	                 && villain_darkness > 0.0;
+	float v_mask = 0.0;
+	float v_band = 0.0;                          // VILLAIN TENDRILS: the zone past the shadow's edge they may reach into
+	float att_l = ATTENUATION;
+	bool is_dir_l = LIGHT_IS_DIRECTIONAL;
+	vec3 lcol_l = LIGHT_COLOR;
+	int ptype_l = pattern_type;
+	if (v_surface) {
+		vec3 wp_m = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+		vec3 to_m = wp_m - villain_light_pos;
+		float cone_m = smoothstep(villain_cone_cos, mix(villain_cone_cos, 1.0, 0.1), dot(normalize(to_m), villain_light_dir));
+		float face_m = smoothstep(0.0, 0.15, dot(normalize(NORMAL), LIGHT));
+		float rag_m = (blender_noise_fbm(vec3(wp_m.xz * 3.0, floor(TIME * villain_flicker_rate) * 0.21), 3.0, 0.0) - 0.5)
+		            * villain_edge_ragged;
+		float shad_m = 1.0 - smoothstep(0.25, 0.55, ATTENUATION + rag_m);
+		// only where the earlier lights printed full paper: in any shade (lines, tone, ink) it hides completely
+		float pl_m = dot(paper_color, vec3(0.2126, 0.7152, 0.0722));
+		// (a lined / inked surface needs no gate: in its own shade the shadowed redraw IS what's already there; only a
+		// Flat surface draws the creature in lines that its plain shade doesn't have)
+		float paper_m = pattern_type != 5 ? 1.0
+		              : smoothstep(pl_m * 0.82, pl_m * 0.95, dot(DIFFUSE_LIGHT, vec3(0.2126, 0.7152, 0.0722)));
+		v_mask = clamp(cone_m * face_m * shad_m * paper_m * villain_darkness, 0.0, 1.0);
+		// TENDRILS: how far past the edge this point is (0 at the edge, 1 at Tendrils' reach) against a sinusoid length
+		if (villain_tendrils > 0.0 && villain_style == 0) {
+			float a_t = ATTENUATION + rag_m;
+			float depth_t = (a_t - 0.4) / max(villain_tendrils * 0.6, 0.001);
+			vec3 wn_t = normalize(mat3(INV_VIEW_MATRIX) * NORMAL);
+			vec2 q_t = wp_m.xz;                                    // ground: the street plan; walls: along the wall
+			if (abs(wn_t.y) < 0.7) {
+				vec3 tw_t = normalize(cross(vec3(0.0, 1.0, 0.0), wn_t));
+				q_t = vec2(dot(wp_m, tw_t), wp_m.y);
+			}
+			float ph_t = (q_t.x + q_t.y * 0.37) * villain_tendril_count + TIME * villain_tendril_speed
+			             + villain_tendril_vary * 4.0 * (blender_noise_fbm(vec3(q_t * villain_tendril_count * 0.31, 1.3), 2.0, 0.0) - 0.5);
+			float len_t = 0.5 + 0.5 * sin(6.28318 * ph_t);
+			len_t = mix(len_t, len_t * len_t, villain_tendril_vary * 0.5);
+			v_band = (depth_t > 0.0 && depth_t < len_t) ? clamp(cone_m * face_m * paper_m * villain_darkness, 0.0, 1.0) : 0.0;
+		}
+		att_l = 0.0;
+		is_dir_l = true;
+		lcol_l = villain_sun_color;
+		if (villain_lamp_range > 0.0) {            // VILLAIN SHADOW LIGHT: a lamp's villain -- this lamp's own light, dimmed
+			float d_l = length(to_m);
+			float nd_l = d_l / villain_lamp_range;     // Godot's omni falloff
+			nd_l *= nd_l;
+			nd_l *= nd_l;
+			nd_l = max(1.0 - nd_l, 0.0);
+			att_l = nd_l * nd_l * pow(max(d_l, 0.0001), -villain_lamp_decay) * villain_shadow_light;
+			is_dir_l = false;
+		}
+		ptype_l = pattern_type == 5 ? villain_flat_pattern : pattern_type;
+	}
+	pos_dark = villain_pass ? !(v_surface && (v_mask > 0.001 || v_band > 0.001)) : pos_dark;   // (inside its shadow this light's own early-out would skip it)
+	// REVEAL FIRST: this light's brightness here x closeness, before any woodcut work; unrevealed = two flat plates, the
+	// woodcut below is skipped (no `return` in light(): the whole woodcut sits inside the block)
+	vec3 rf_dl_in = DIFFUSE_LIGHT;
+	float rf_t = 1.0;
+	vec3 rf_plate = ink_color;
+	if (use_reveal_first && !villain_pass) {
+		float rf_lw = clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * att_l * scene_intensity
+		              * (use_light_energy ? dot(lcol_l, vec3(0.2126, 0.7152, 0.0722)) / PI : 1.0);
+		float rf_at = is_dir_l ? rf_reveal_light : rf_lamp_reveal_light;
+		float rf_near = 1.0 - smoothstep(rf_reveal_near_m, rf_reveal_near_m + rf_reveal_fade_m, length(v_view));
+		rf_t = smoothstep(rf_at - rf_reveal_soft, rf_at + rf_reveal_soft + 0.0001, rf_lw) * rf_near;
+		if (rf_close_m > 0.0 && hero_position.y > -50000.0) {
+			vec3 rf_wp = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+			rf_t = max(rf_t, 1.0 - smoothstep(rf_close_m, rf_close_m + rf_close_fade_m, distance(rf_wp, hero_position)));
+		}
+		rf_plate = mix(ink_color, rf_plate_color, smoothstep(rf_plate_cut - 0.03, rf_plate_cut + 0.03, rf_lw));
+	}
+	if (!pos_dark && rf_t > 0.0) {
+
+	// ---- coordinate space -------------------------------------
+	vec2 view_c = v_view.xy;
+	// VIEW ALIGNED frame (proj_type 1): camera axes brought into model space; the offset is v_obj
+	vec3 pr_r = vec3(1.0, 0.0, 0.0), pr_u = vec3(0.0, 1.0, 0.0), pr_wup = vec3(0.0, 1.0, 0.0);
+	float pr_daz = 0.0, pr_del = 0.0;
+	if (proj_type == 1) {
+		mat3 Mi = inverse(mat3(MODEL_MATRIX));
+		vec3 fwd_w = -normalize(INV_VIEW_MATRIX[2].xyz);
+		pr_r = normalize(Mi * INV_VIEW_MATRIX[0].xyz);
+		pr_u = normalize(Mi * INV_VIEW_MATRIX[1].xyz);
+		if (plate_step > 0.00001) {
+			// hold the projection at the last snapped azimuth / elevation: counter-rotate the
+			// offset by how far the camera has turned past it (Blender's construction, Y up)
+			float s = radians(plate_step);
+			vec3 fwd_s = plate_step_space == 1 ? normalize(Mi * fwd_w) : fwd_w;   // Object: her own frame
+			float az = atan(fwd_s.x, fwd_s.z);
+			float el = asin(clamp(fwd_s.y, -1.0, 1.0));
+			pr_daz = az - round(az / s) * s;
+			pr_del = el - round(el / s) * s;
+			pr_wup = normalize(Mi * vec3(0.0, 1.0, 0.0));
+		}
+	}
+	vec2 obj_raw = obj_project(v_obj, v_obj_n, pr_r, pr_u, pr_wup, pr_daz, pr_del);
+	vec2 obj_c  = obj_raw * object_scale_comp;
+	vec2 coord  = mix(view_c, obj_c, pattern_pov_cam_to_obj);
+	coord = mix(coord, SCREEN_UV / max(window_scale_comp, 0.0001),
+	            pattern_pov_win);
+	if (v_surface && pattern_type == 5) {
+		coord *= villain_flat_scale;                       // VILLAIN SHADOW on a Flat surface: its own line spacing
+	}
+	if (parabola_from_panel && ptype_l == 2) {
+		coord = v_panel * object_scale_comp;            // vertex at each panel's centre (+ Pattern Center)
+	}
+	if (parabola_from_world && ptype_l == 2) {
+		// a grid of cells on each wall by world position; the vertex at each cell's centre (+ Pattern Center)
+		vec3 wpp = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+		vec3 wnn = normalize(mat3(INV_VIEW_MATRIX) * NORMAL);
+		// measured from the centre of this point's world cell (a box grid), so facets that lean a few degrees apart
+		// shift the lines by millimetres, not by (distance from the world origin) x (angle)
+		float cw = max(parabola_world_cell, 0.01);
+		vec3 rel = wpp - (floor(wpp / cw) + 0.5) * cw;
+		vec2 ow;
+		if (abs(wnn.y) > 0.7) {
+			ow = rel.xz;                                  // floors / flat roofs: a level grid
+		} else {
+			float st = radians(max(parabola_world_snap, 0.1));
+			float az = round(atan(wnn.x, wnn.z) / st) * st;   // the wall's facing, snapped
+			vec3 across = vec3(cos(az), 0.0, -sin(az));       // along the wall, level
+			ow = vec2(dot(rel, across), rel.y);               // along the wall, up the wall
+		}
+		coord = ow * object_scale_comp;
+	}
+
+	// SMOOTH MOIRE MEASURE (10 Oct 2026, Orion: the terrain still facets along the 2 m squares with
+	// anti-moire on). Anti-moire reads the pattern's change per pixel with dFdx/dFdy, which on a
+	// faceted mesh is constant per triangle and jumps at every edge. This measures it on the
+	// SMOOTH surface instead: the change of the view ray (exactly linear on screen, no facets)
+	// intersected with the plane of the interpolated normal, then put through the same projection.
+	vec2 dcoord_x = vec2(0.0), dcoord_y = vec2(0.0);
+	if (use_anti_moire && anti_moire_smooth) {
+		vec3 q = v_view / max(-v_view.z, 0.0001);
+		vec3 Ns = normalize(NORMAL);
+		float dn = dot(q, Ns);
+		dn = abs(dn) < 0.0001 ? (dn < 0.0 ? -0.0001 : 0.0001) : dn;
+		vec3 dqx = dFdx(q), dqy = dFdy(q);
+		float dep = -v_view.z;
+		vec3 dPx = dep * (dqx - q * dot(dqx, Ns) / dn);
+		vec3 dPy = dep * (dqy - q * dot(dqy, Ns) / dn);
+		mat3 v2m = inverse(mat3(MODEL_MATRIX)) * mat3(INV_VIEW_MATRIX);
+		vec2 dox = obj_project(v2m * dPx, v_obj_n, pr_r, pr_u, pr_wup, pr_daz, pr_del) * object_scale_comp;
+		vec2 doy = obj_project(v2m * dPy, v_obj_n, pr_r, pr_u, pr_wup, pr_daz, pr_del) * object_scale_comp;
+		dcoord_x = mix(dPx.xy, dox, pattern_pov_cam_to_obj);
+		dcoord_y = mix(dPy.xy, doy, pattern_pov_cam_to_obj);
+		dcoord_x = mix(dcoord_x, dFdx(SCREEN_UV) / max(window_scale_comp, 0.0001), pattern_pov_win);
+		dcoord_y = mix(dcoord_y, dFdy(SCREEN_UV) / max(window_scale_comp, 0.0001), pattern_pov_win);
+	}
+
+	// ---- STOP-MOTION BOIL: this step's jump for the noise fields --
+	vec2 boil_n = vec2(0.0);
+	float boil_h = 0.0;
+	if (use_boil) {
+		boil_n = (vec2(hash21(vec2(boil_step, 1.7)), hash21(vec2(boil_step, 9.2))) - 0.5) * 2.0 * boil_amount;
+		boil_h = hash21(vec2(boil_step, 4.4)) * 2.0 - 1.0;
+	}
+
+	// ---- WOBBLE (perturb coordinate before the sine) ----------
+	float wob = 0.0;
+	if (use_wobble && wobble_amount > 0.0) {
+		vec2 wob_c = mix(view_c, obj_c, wobble_pov_cam_to_obj);
+		// divided by wave_scale so the dial stays meaningful at any
+		// line density - one unit is one line spacing
+		float wob_s = wobble_field == 1
+			? (use_noise_lod ? blender_noise_fbm_lod(vec3(wob_c * wobble_scale + boil_n, 0.0),
+			                                         wobble_detail, wobble_distortion, noise_lod_px)
+			                 : blender_noise_fbm(vec3(wob_c * wobble_scale + boil_n, 0.0),
+			                                     wobble_detail, wobble_distortion))
+			: texture(wobble_tex, wob_c * wobble_scale + boil_n).r;
+		wob = (wob_s - 0.5)
+		      * wobble_amount * 6.28318 / max(wave_scale, 0.0001);
+	}
+
+	// ---- DISTANCE GAUGE --------------------------------------
+	float gauge = 1.0;
+	if (use_distance_gauge) {
+		float d = max(length(v_view), 0.0001);
+		float f = max(gauge_ref_dist / d, 0.0001);
+		// power-of-two steps keep the sine's zeros in place
+		gauge = exp2(floor(log2(f)));
+	}
+
+	// ---- PATTERN arm -----------------------------------------
+	if (use_boil && boil_line_jitter > 0.0) {
+		wob += boil_h * boil_line_jitter * 6.28318 / max(wave_scale * gauge, 0.0001);   // a fraction of one line spacing
+	}
+	float pattern = make_pattern(ptype_l, coord, wob, gauge);
+	pattern = min(pattern, pattern_cap);
+	if (use_anti_moire && ptype_l != 5) {          // (Flat has no lines to fade or coarsen)
+		// the sine's phase across the screen: radians per pixel -> pixels per line period
+		float phase = rotate2d(coord - pattern_center, line_angle).x * wave_scale * gauge;
+		float rad_px = anti_moire_smooth
+			? length(vec2(rotate2d(dcoord_x, line_angle).x, rotate2d(dcoord_y, line_angle).x)) * wave_scale * gauge
+			: length(vec2(dFdx(phase), dFdy(phase)));
+		float period_px = 6.28318 / max(rad_px, 0.000001);
+		if (anti_moire_coarsen) {
+			// keep the lines coarsen_px apart: each level doubles the spacing. Between levels every other
+			// line thins away while the kept ones widen -- same tone, so no edge where it happens. Level n
+			// is shifted so its ridges sit exactly on every 2^n-th ridge of the authored lines.
+			float s0 = max(wave_scale * gauge, 0.0001);
+			float period_lod = period_px;
+			vec3 wp_co = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+			float plate_dip = 0.0;                         // how far this point's lines are faded (crossfade)
+			if (coarsen_plate_step && coarsen_plate_cam_0.y > -50000.0) {
+				// the spacing as seen from a HELD camera: on screen it scales with 1 / distance
+				float d_now = max(length(v_view), 0.0001);
+				float cpx = max(coarsen_px, 0.5);
+				vec3 hc = coarsen_plate_cam_0;
+				int slot = 0;
+				if (coarsen_plate_stagger) {
+					// which level this point is on (as seen from the first held position) picks its own held position
+					float l0 = log2(cpx / (period_px * d_now / max(length(wp_co - hc), 0.0001)));
+					int band = int(clamp(floor(l0), 0.0, float(coarsen_levels - 1)));
+					slot = band - (band / 4) * 4;
+					hc = slot == 1 ? coarsen_plate_cam_1 : slot == 2 ? coarsen_plate_cam_2
+					   : slot == 3 ? coarsen_plate_cam_3 : coarsen_plate_cam_0;
+					if (hc.y < -50000.0) { hc = coarsen_plate_cam_0; slot = 0; }
+				}
+				period_lod = period_px * d_now / max(length(wp_co - hc), 0.0001);
+				// CROSSFADE: fade the lines whose level the coming re-lay will change (held vs live), and the ones the
+				// last re-lay just changed (previous vs held)
+				vec4 oh = vec4(slot == 0 ? 1.0 : 0.0, slot == 1 ? 1.0 : 0.0, slot == 2 ? 1.0 : 0.0, slot == 3 ? 1.0 : 0.0);
+				float db = dot(coarsen_plate_dip_before, oh);
+				float da = dot(coarsen_plate_dip_after, oh);
+				if (db > 0.0 || da > 0.0) {
+					vec3 pc = slot == 1 ? coarsen_plate_prev_1 : slot == 2 ? coarsen_plate_prev_2
+					        : slot == 3 ? coarsen_plate_prev_3 : coarsen_plate_prev_0;
+					if (pc.y < -50000.0) { pc = hc; }
+					float l_live = log2(cpx / period_px);
+					float l_held = log2(cpx / period_lod);
+					float l_prev = log2(cpx / (period_px * d_now / max(length(wp_co - pc), 0.0001)));
+					float wb = clamp(abs(l_live - l_held) * 4.0, 0.0, 1.0);
+					float wa = clamp(abs(l_held - l_prev) * 4.0, 0.0, 1.0);
+					plate_dip = max(db * wb, da * wa);
+				}
+			}
+			float lod = log2(max(coarsen_px, 0.5) / period_lod);
+			if (coarsen_ragged > 0.0) {
+				lod += perlin3(vec3(wp_co.xz / max(coarsen_ragged_size, 0.01), 3.7)) * coarsen_ragged;
+			}
+			lod = clamp(lod, 0.0, float(coarsen_levels));
+			if (coarsen_snap) {
+				lod = min(floor(lod + 0.5), float(coarsen_levels));
+			}
+			float lo = floor(lod);
+			float fr = smoothstep(0.0, 1.0, lod - lo);
+			float n0 = exp2(lo);
+			float n1 = n0 * 2.0;
+			float p0 = make_pattern(ptype_l, coord, wob + (n0 - 1.0) * 1.5707963 / s0, gauge / n0);
+			float p1 = fr > 0.0 ? make_pattern(ptype_l, coord, wob + (n1 - 1.0) * 1.5707963 / s0, gauge / n1) : p0;
+			pattern = min(mix(p0, p1, fr), pattern_cap);
+			if (plate_dip > 0.0) {                         // Plate Step crossfade: paper (0), ink (1) or the flat tone
+				float fade_tgt = coarsen_plate_fade_to == 1 ? 1.0 : coarsen_plate_fade_to == 2 ? fade_level : 0.0;
+				pattern = mix(pattern, fade_tgt, clamp(plate_dip, 0.0, 1.0));
+			}
+			period_px *= exp2(lod);            // what is on screen now; fades only past the last level
+		}
+		float fade = 1.0 - smoothstep(fade_px_min, max(fade_px_max, fade_px_min + 0.001), period_px);
+		pattern = mix(pattern, fade_level, fade);
+	}
+	// raise the terrain floor - shadows go solid, highlights keep line
+	pattern = mix(ink_flood, 1.0, pattern);
+	float cross   = gen_pattern(cross_type, coord, cross_scale * gauge,
+	                            cross_angle, wob);
+
+	// ---- LUMINANCE arm ---------------------------------------
+	vec3 n = normalize(NORMAL);
+	if (flatten_normal > 0.0) {
+		// bend near-level surfaces toward straight up, so grid-scale bumps stop changing the light;
+		// slopes steeper than flatten_keep_deg keep their own normal (banks, cuts)
+		vec3 up_v = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+		float ang = degrees(acos(clamp(dot(n, up_v), -1.0, 1.0)));
+		float w = flatten_normal * (1.0 - smoothstep(flatten_keep_deg - 4.0, flatten_keep_deg + 4.0, ang));
+		n = normalize(mix(n, up_v, w));
+	}
+
+	vec3 n_flat = n;                          // the normal before the cobbles (Street Centre reads the ground's plain light)
+
+	// ---- COBBLES (relief on level ground, after Flatten Normal) ----
+	float cob_dark = 0.0;                    // share of the light the cobbles take off (joints / far tone)
+	float cob_wear = 0.0;                     // light added in the worn middles (lifted at the waterline)
+	float cob_corner_w = 0.0;                 // the corner bevel's weight, for Corner In Light (0 = not near a corner)
+	float se_ink = 0.0;                       // Street Edges' inked detail (joints, lips, gravel), for Keep In Tone
+	if (use_cobbles) {
+		// computed everywhere (no branch on the slope) so the screen derivatives stay valid
+		vec3 up_c = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+		float slope_deg = degrees(acos(clamp(dot(normalize(NORMAL), up_c), -1.0, 1.0)));
+		float lvl = 1.0 - smoothstep(cobble_max_slope - 3.0, cobble_max_slope + 3.0, slope_deg);
+		vec3 wp_c = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+		vec2 p = rotate2d(wp_c.xz, cobble_angle) * cobble_per_m;
+		p.x /= max(cobble_length, 0.01);
+		vec2 p_dx = dFdx(p), p_dy = dFdy(p);   // before the row offsets, which jump at every row seam
+		// STREET EDGES: which part of the street this is (0 paving field, 1 gutter, 2 edge row, 3 gravel)
+		int se_zone = 0;
+		float se_c = 0.0;                      // metres across the center line (+ = left)
+		vec2 se_dir = vec2(1.0, 0.0);          // along the line, in world X / Z
+		vec2 se_nl = vec2(0.0, -1.0);          // across it (toward + across)
+		vec2 se_cell_m = vec2(1.0);            // the stone's size in metres (along, across)
+		float se_px_m = 0.01;                  // metres per screen pixel here
+		if (use_street_edges) {
+			vec2 e_org = street_map_night_placement ? night_map_origin : street_map_origin;
+			vec2 e_siz = street_map_night_placement ? night_map_size : street_map_size;
+			vec2 euv = (wp_c.xz - e_org) / max(e_siz, vec2(0.001));
+			vec4 se = texture(street_edges_map, euv);
+			bool se_on = euv.x >= 0.0 && euv.x <= 1.0 && euv.y >= 0.0 && euv.y <= 1.0;
+			se_c = se.r;
+			float se_s = se.g;
+			// the street's direction from the map itself: the world gradient of "along" (screen derivatives, solved)
+			vec2 wdx = dFdx(wp_c.xz), wdy = dFdy(wp_c.xz);
+			vec2 sd_s = vec2(dFdx(se_s), dFdy(se_s));
+			vec2 sd_c = vec2(dFdx(se_c), dFdy(se_c));
+			se_px_m = max(max(length(wdx), length(wdy)), 0.0001);
+			float det = wdx.x * wdy.y - wdx.y * wdy.x;
+			mat2 jinv = mat2(vec2(wdy.y, -wdy.x), vec2(-wdx.y, wdx.x)) / (abs(det) > 1e-10 ? det : 1e-10);
+			vec2 gs = jinv * sd_s;
+			se_dir = length(gs) > 1e-5 ? normalize(gs) : vec2(1.0, 0.0);
+			se_nl = vec2(se_dir.y, -se_dir.x);
+			float ac = abs(se_c);
+			float e_out = se.b;
+			float g_end = min(abs(se.a), e_out + street_gravel_max);
+			if (se_on && e_out > 1.2) {
+				if (se.a > 0.0 && ac < street_gutter_width * 0.5) {
+					se_zone = 1;
+				} else if (ac >= e_out - street_edge_stone_width && ac < e_out) {
+					se_zone = 2;
+				} else if (ac >= e_out && ac < g_end) {
+					se_zone = 3;
+				}
+			}
+			if (se_zone == 1) {
+				// two rows of stones laid lengthwise down the gutter
+				float g_len = street_gutter_joints_match
+					? max(1.0, floor(street_gutter_stone_length / max(street_edge_stone_length, 0.01) + 0.5)) * street_edge_stone_length
+					: street_gutter_stone_length;
+				se_cell_m = vec2(g_len, street_gutter_width * 0.5);
+				p = vec2(se_s / se_cell_m.x, (se_c + street_gutter_width * 0.5) / se_cell_m.y + 20.0);
+			} else if (se_zone == 2) {
+				// one row, its own stones, joints spaced along the center line so the row curves with the street
+				se_cell_m = vec2(street_edge_stone_length, street_edge_stone_width);
+				float inner = se_c >= 0.0 ? e_out - street_edge_stone_width : -e_out;
+				p = vec2(se_s / se_cell_m.x, (se_c - inner) / se_cell_m.y + (se_c >= 0.0 ? 30.0 : 40.0));
+			}
+			if (se_zone == 1 || se_zone == 2) {
+				p_dx = vec2(sd_s.x / se_cell_m.x, sd_c.x / se_cell_m.y);
+				p_dy = vec2(sd_s.y / se_cell_m.x, sd_c.y / se_cell_m.y);
+			}
+		}
+		float row = floor(p.y);
+		// (edge row / gutter stones: a plain half bond, never jittered, so their joints line up across the street)
+		p.x += se_zone == 1 || se_zone == 2 ? 0.5 * mod(row, 2.0) : mix(0.5 * mod(row, 2.0), hash21(vec2(row, 3.1)), cobble_jitter);
+		vec2 cell = vec2(floor(p.x), row);
+		vec2 u = fract(p) - 0.5;              // across the stone, -0.5 .. 0.5 (cell units)
+		vec2 su = vec2(u.x < 0.0 ? -1.0 : 1.0, u.y < 0.0 ? -1.0 : 1.0);
+		// rounded square: signed distance to the stone's edge (< 0 inside)
+		float half_s = 0.5 - cobble_joint * 0.5;
+		float rad = mix(0.0, half_s * 0.6, cobble_round);   // Round 0 = square corners (was a hidden 0.03 minimum)
+		vec2 cb_q = abs(u) - (half_s - rad);
+		float sdf = length(max(cb_q, 0.0)) + min(max(cb_q.x, cb_q.y), 0.0) - rad;
+		vec2 g = (cb_q.x > 0.0 || cb_q.y > 0.0) ? normalize(max(cb_q, 0.0) + 0.00001)
+		                                  : (cb_q.x > cb_q.y ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
+		g *= su;                               // outward, away from the stone's centre
+		// bevel: steepest (cobble_depth) at the edge, level on the top
+		float bev = max(cobble_bevel_width, 0.00001);        // Bevel Width 0 = no bevel: t is 1 everywhere on the stone
+		float t = clamp(-sdf / bev, 0.0, 1.0);
+		// corner focus: the bevel strongest where the joints meet, falling off along the edges
+		float bevel_k = 1.0;
+		if (cobble_corner_focus > 0.0) {
+			float x_c = clamp(length(abs(u) - vec2(half_s)) / max(cobble_corner_reach, 0.001), 0.0, 1.0);
+			float k_c = max(cobble_corner_sharpness, 0.001);
+			float w_c = cobble_corner_use_curve ? texture(cobble_corner_curve, vec2(x_c, 0.5)).r
+			                                    : (exp(-k_c * x_c) - exp(-k_c)) / (1.0 - exp(-k_c));
+			bevel_k = mix(1.0, w_c, cobble_corner_focus);
+		}
+		// corner in light: where the corner bevel is (its edge strips near the corners), for the ceiling applied later
+		if (cobble_corner_in_light > 0.0 || cobble_corner_in_tone > 0.0) {
+			float x_ci = clamp(length(abs(u) - vec2(half_s)) / max(cobble_corner_reach, 0.001), 0.0, 1.0);
+			float k_ci = max(cobble_corner_sharpness, 0.001);
+			float w_ci = cobble_corner_use_curve ? texture(cobble_corner_curve, vec2(x_ci, 0.5)).r
+			                                     : (exp(-k_ci * x_ci) - exp(-k_ci)) / (1.0 - exp(-k_ci));
+			// the strip's width: the bevel's own (Follows Bevel) or Corner Light Width
+			float w_strip = cobble_corner_in_light_follows_bevel ? cobble_bevel_width : cobble_corner_in_light_width;
+			float t_ci = clamp(-sdf / max(w_strip, 0.00001), 0.0, 1.0);
+			if ((se_zone == 1 || se_zone == 2) && street_edge_joint > 0.0) {
+				// Street Edges stones: the same corner strips, Line Width metres wide (their cells are not field-sized)
+				float dj_c = min((0.5 - abs(u.x)) * se_cell_m.x, (0.5 - abs(u.y)) * se_cell_m.y);
+				t_ci = clamp(dj_c / street_edge_joint, 0.0, 1.0);
+			}
+			// the shaded side: the stone edge's outward direction, in the world, against the light's level direction
+			vec2 g_w = rotate2d(g, -cobble_angle);
+			if (se_zone == 1 || se_zone == 2) {
+				g_w = g.x * se_dir + g.y * se_nl;
+			}
+			vec3 l_w = mat3(INV_VIEW_MATRIX) * LIGHT;
+			float away = length(l_w.xz) > 0.001 && length(g_w) > 0.001
+				? -dot(normalize(vec2(g_w.x, g_w.y)), normalize(l_w.xz)) : 1.0;
+			float side_ci = mix(1.0, smoothstep(0.0, 0.35, away), cobble_corner_in_light_shade_side);
+			cob_corner_w = (1.0 - t_ci) * w_ci * side_ci;  // (the joint itself is taken out below, once jm exists)
+		}
+		float aa = max(fwidth(sdf), 0.0001);
+		float jm = smoothstep(-aa, aa, sdf);   // 1 in the joint
+		vec2 tilt = (vec2(hash21(cell + 7.3), hash21(cell + 1.9)) - 0.5) * 2.0 * cobble_tilt;
+		float cb_depth = mix(cobble_shadow_depth, cobble_depth, clamp(att_l, 0.0, 1.0));
+		// the corner fall-off scales the bevel's ANGLE, not its steepness (12 Oct 2026, Orion: with a steep Shadow
+		// Depth, 30% of the steepness still bent the light almost fully, so the taper toward the corners didn't
+		// show). At bevel_k 1 this is exactly the old bevel.
+		float b_ang = atan(cb_depth * (1.0 - t)) * bevel_k;
+		vec2 lean = (g * tan(b_ang) - tilt) * (1.0 - jm);
+		lean = rotate2d(lean, -cobble_angle);
+		if (se_zone == 1 || se_zone == 2) {
+			// those cells were laid in the street's frame: x along the line, y across it
+			vec2 l0 = (g * tan(b_ang) - tilt) * (1.0 - jm);
+			lean = l0.x * se_dir + l0.y * se_nl;
+		}
+		float se_lip = 0.0;
+		if (se_zone == 1) {
+			// flat bottom, sloping lips: the ground rises outward from the flat, so the light leans toward the middle
+			se_lip = smoothstep(street_gutter_flat * 0.5, street_gutter_flat * 0.5 + 0.04, abs(se_c));
+			if (!street_gutter_real) {
+				lean -= sign(se_c) * se_nl * street_gutter_slope * se_lip;
+			}
+		}
+		float se_far_g = 0.0, se_speck = 0.0;
+		if (se_zone == 3) {
+			// gravel: no stones; scattered specks, each its own size, shape and place, that tilt the light a little
+			vec2 gq = wp_c.xz * street_gravel_grain;
+			vec2 gc = floor(gq);
+			vec2 off = vec2(hash21(gc + 3.7), hash21(gc + 9.1)) * 0.5 + 0.25;
+			float rr = mix(0.12, 0.38, hash21(gc + 5.3)) * step(hash21(gc + 2.2), street_gravel_fill);
+			float rag = perlin3(vec3(gq * 2.7, 4.1)) * 0.12;
+			float dd = length((fract(gq) - off) * vec2(1.0, mix(0.7, 1.3, hash21(gc + 8.8)))) - rr + rag;
+			float ad = max(se_px_m * street_gravel_grain, 0.001);
+			se_speck = (1.0 - smoothstep(-ad, ad, dd)) * step(0.01, rr);
+			se_far_g = smoothstep(0.12, 0.45, ad);              // too small on screen: an even tone instead
+			lean = vec2(perlin3(vec3(gq * 0.5, 1.3)), perlin3(vec3(gq * 0.5, 7.9))) * street_gravel_lean * (1.0 - se_far_g);
+			jm = 0.0;
+		}
+		// the stone's size on screen: fade the relief before it shimmers
+		float cell_px = 1.0 / max(max(length(p_dx), length(p_dy)), 0.000001);
+		float keep_c = smoothstep(cobble_fade_px_min, max(cobble_fade_px_max, cobble_fade_px_min + 0.001), cell_px);
+		vec3 cb_dn = mat3(VIEW_MATRIX) * vec3(lean.x, 0.0, lean.y);
+		if ((se_zone == 1 && street_gutter_real) || (se_zone == 2 && street_edge_skip_flatten)) {
+			n = normalize(NORMAL);             // the real drain's lips / the setts: the ground's own normal, unflattened
+		}
+		n = normalize(n + cb_dn * lvl * keep_c);
+		cob_dark = lvl * mix(cobble_far_darken, jm * cobble_joint_dark, keep_c);
+		cob_corner_w *= lvl * keep_c * (1.0 - jm);   // level ground, on the stone; fades with the relief far away
+		if (se_zone == 1 || se_zone == 2) {
+			// edge row / gutter stones: a joint of the same width in METRES all round each stone
+			vec2 u_e = fract(p) - 0.5;
+			float dj = min((0.5 - abs(u_e.x)) * se_cell_m.x, (0.5 - abs(u_e.y)) * se_cell_m.y);
+			float aj = se_px_m * 0.75;
+			float ej = 1.0 - smoothstep(street_edge_joint - aj, street_edge_joint + aj, dj);
+			float ink_e = max(ej * street_edge_joint_ink, se_lip * street_gutter_lip_ink) * lvl * keep_c;
+			cob_dark = max(cob_dark, ink_e);
+			se_ink = ink_e;
+		}
+		if (se_zone == 3) {
+			cob_dark = lvl * max(street_gravel_tone, mix(se_speck * street_gravel_ink, street_gravel_far_tone, se_far_g));
+			se_ink = lvl * max(street_gravel_tone, se_speck * street_gravel_ink * (1.0 - se_far_g));
+			cob_corner_w = 0.0;
+		}
+		// worn middle: 0 at the stone's edge, 1 at its centre; a ragged noise edge; fades with the relief far away
+		float w_amt = mix(cobble_wear_shadow, cobble_wear, clamp(att_l, 0.0, 1.0));
+		if (w_amt > 0.0 && se_zone != 3) {
+			float centre = clamp(-sdf / max(half_s, 0.001), 0.0, 1.0);
+			float rag = perlin3(vec3(p * cobble_wear_grain, row * 1.7)) * cobble_wear_ragged * 0.5;
+			float w0 = 1.0 - cobble_wear_size;
+			float w_mask = smoothstep(w0, w0 + 0.15 + 0.35 * cobble_wear_size, centre + rag);
+			cob_wear = w_amt * w_mask * (1.0 - jm) * lvl * keep_c;
+		}
+	}
+
+	// scene light: shadowed, because att_l carries the shadow map
+	float lum_scene = clamp(dot(n, LIGHT), 0.0, 1.0)
+	                  * att_l * scene_intensity;
+	// v36: the light's own energy and colour (Godot folds a PI into
+	// lcol_l; divided back out, so a Sun of energy 1 still gives 1)
+	if (use_light_energy) {
+		lum_scene *= dot(lcol_l, vec3(0.2126, 0.7152, 0.0722)) / PI;
+	}
+
+	// internal light: never shadowed, sets the floor
+	// n is in view space: From View uses Internal Dir as a camera-frame direction as it is
+	vec3  idir = internal_from_view
+		? normalize(internal_dir)
+		: normalize((VIEW_MATRIX * vec4(internal_dir, 0.0)).xyz);
+	float lum_int = clamp(dot(n, idir), 0.0, 1.0) * internal_intensity;
+	float int_mul = 1.0;                      // the internal light's night dimming (kept for Street Centre)
+	if (internal_at_night < 0.999 && is_dir_l) {
+		float night_i = 1.0 - clamp(dot(lcol_l, vec3(0.2126, 0.7152, 0.0722)) / PI / night_day_energy, 0.0, 1.0);
+		if (internal_night >= 0.0) {
+			night_i = clamp(internal_night, 0.0, 1.0);          // the clock's night (district1_setup.gd)
+		}
+		int_mul = mix(1.0, internal_at_night, night_i);
+		lum_int *= int_mul;
+	}
+
+	// POSITIONAL LIGHTS ADD ONLY THEIR OWN LIGHT (11 Oct 2026, Orion: a blocky halo, blocks ~4 lines wide standing
+	// upright on screen, round the lantern's pool). Forward+ runs a spot / omni pass on every pixel of each ~32 px
+	// screen tile its range touches; each pass printed a whole woodcut from (its light + the internal fill), and the
+	// fill is dimmed at night only in the SUN's pass -- so the lantern's tiles printed brighter, tile by tile. On: a
+	// spot / omni pass leaves pixels it does not light alone, and adds no fill of its own (the sun's pass has it).
+	// district1_setup.gd switches it on at run time for the district's woodcut materials; off = as before (the
+	// character salons, lit only by spots, need the fill from those spots).
+	// (no early return: Godot does not allow `return` in light(); the OUTPUT block is skipped instead)
+	bool own_light_skip = false;
+	if (positional_own_light && !is_dir_l) {
+		own_light_skip = lum_scene <= 0.0005;
+		lum_int = 0.0;
+		int_mul = 0.0;
+	}
+
+	// ---- SUN BOUNCE (reflected light from the side away from the sun; Sun's pass only, never shadowed) ----
+	float lum_bounce = 0.0;
+	if (use_sun_bounce && is_dir_l) {
+		vec3 up_b = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+		vec3 l_flat = LIGHT - up_b * dot(LIGHT, up_b);                        // the sun's direction, level
+		vec3 away = length(l_flat) > 0.001 ? -normalize(l_flat) : vec3(0.0);  // the side away from the sun
+		vec3 b_dir = normalize(away * (1.0 - sun_bounce_from_below) - up_b * (sun_bounce_from_below + 0.001));
+		float b_e = use_light_energy ? dot(lcol_l, vec3(0.2126, 0.7152, 0.0722)) / PI : 1.0;
+		float b_ndl = clamp((dot(n, b_dir) + sun_bounce_wrap) / (1.0 + sun_bounce_wrap), 0.0, 1.0);
+		lum_bounce = b_ndl * b_e * scene_intensity * sun_bounce;
+	}
+
+	float lum = lum_scene + lum_int + lum_bounce;
+	lum *= 1.0 - cob_dark;                   // cobble joints (near) / their average (far); 0 when off
+
+	// ---- MAP RANGE -------------------------------------------
+	lum = remap(lum, in_min, in_max, out_min, out_max);
+	if (clamp_result) {
+		lum = clamp(lum, 0.0, 1.0);
+	}
+	if (use_lum_curve && lum >= 0.0 && lum <= 1.0) {
+		lum = texture(lum_curve, vec2(lum, 0.5)).r;
+	}
+	lum += ink_bias;
+
+	// FLAT ROUND > Round Cobbles: the cobbles' share of the light (relief + joints), the same light without them taken
+	// through the same Map Range; the ink's edge leaves it out at the waterline
+	float flat_cob = 0.0;
+	if (ptype_l == 5 && flat_round_cobbles > 0.0) {
+		float lp = clamp(dot(n_flat, LIGHT), 0.0, 1.0) * att_l * scene_intensity
+		         * (use_light_energy ? dot(lcol_l, vec3(0.2126, 0.7152, 0.0722)) / PI : 1.0)
+		         + clamp(dot(n_flat, idir), 0.0, 1.0) * internal_intensity * int_mul   // (int_mul 0 = no fill, as lum_int)
+		         + lum_bounce;
+		lp *= 1.0 - se_ink;                       // Street Edges' inked joints and gravel specks stay in the ink
+		lp = remap(lp, in_min, in_max, out_min, out_max);
+		if (clamp_result) {
+			lp = clamp(lp, 0.0, 1.0);
+		}
+		if (use_lum_curve && lp >= 0.0 && lp <= 1.0) {
+			lp = textureLod(lum_curve, vec2(lp, 0.5), 0.0).r;
+		}
+		flat_cob = lum - (lp + ink_bias);
+	}
+
+	// ---- DAY WALL FLOOR (shaded walls stay open by day) ----
+	if (use_day_wall_floor && is_dir_l) {
+		vec3 up_w = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+		float lean_w = abs(dot(normalize(NORMAL), up_w));                    // 0 = sheer wall, 1 = level
+		float wall_w = 1.0 - smoothstep(day_wall_steepness, day_wall_steepness + 0.25, lean_w);
+		float night_w = internal_night >= 0.0
+			? clamp(internal_night, 0.0, 1.0)                                   // the clock's night
+			: 1.0 - clamp(dot(lcol_l, vec3(0.2126, 0.7152, 0.0722)) / PI / night_day_energy, 0.0, 1.0);
+		float day_k = mix(1.0, day_wall_at_night, smoothstep(0.0, 1.0, night_w)) * wall_w;
+		float knee = max(day_wall_knee, day_wall_floor + 0.001);
+		// squeeze 0 .. knee into floor .. knee (below 0 counts as 0); above the knee unchanged
+		float lifted = lum < knee ? day_wall_floor + (knee - day_wall_floor) * clamp(lum / knee, 0.0, 1.0) : lum;
+		lum = mix(lum, lifted, day_k);
+	}
+
+	// ---- STREET MAPS (top-down: the painted street middles, the distance to the nearest wall) ----
+	float s_mask = 0.0;                       // the painted street middle (0..1)
+	float street_added = 0.0;                 // light Street Centre's Line Lift added (the tone plate leaves it out)
+	float wall_d = 1000.0;                    // metres to the nearest wall (off the map = far)
+	float shadow_edge = 0.0;                  // 1 along the edge of a cast shadow (computed always: derivatives)
+	vec3 up_g = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+	float ground_g = smoothstep(0.85, 0.95, dot(normalize(NORMAL), up_g));    // level ground only
+	if (use_street_centre || use_wall_skirt) {
+		vec3 wp_s = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+		vec2 s_org = street_map_night_placement ? night_map_origin : street_map_origin;
+		vec2 s_siz = street_map_night_placement ? night_map_size : street_map_size;
+		vec2 suv = (wp_s.xz - s_org) / max(s_siz, vec2(0.001));
+		if (suv.x >= 0.0 && suv.x <= 1.0 && suv.y >= 0.0 && suv.y <= 1.0) {
+			s_mask = texture(street_centre_map, suv).r;
+			wall_d = texture(wall_distance_map, suv).r * wall_map_range;
+		}
+		shadow_edge = is_dir_l ? smoothstep(0.02, 0.15, fwidth(att_l)) : 0.0;
+	}
+
+	// ---- STREET CENTRE (lines and cobbles fade toward the street's middle, in the mid-tones) ----
+	if (use_street_centre && !(v_surface && villain_ignore_street_centre)) {
+		// the ground's plain light (no cobbles), through the same Map Range, decides "mid-tone"
+		float sk = att_l * scene_intensity;
+		if (use_light_energy) {
+			sk *= dot(lcol_l, vec3(0.2126, 0.7152, 0.0722)) / PI;
+		}
+		float lf = clamp(dot(n_flat, LIGHT), 0.0, 1.0) * sk
+		         + clamp(dot(n_flat, idir), 0.0, 1.0) * internal_intensity * int_mul;
+		lf = remap(lf, in_min, in_max, out_min, out_max);
+		if (clamp_result) {
+			lf = clamp(lf, 0.0, 1.0);
+		}
+		if (use_lum_curve && lf >= 0.0 && lf <= 1.0) {
+			lf = texture(lum_curve, vec2(lf, 0.5)).r;
+		}
+		lf += ink_bias;
+		float band = smoothstep(street_mid_low - street_mid_soft, street_mid_low + street_mid_soft, lf)
+		           * (1.0 - smoothstep(street_mid_high - street_mid_soft, street_mid_high + street_mid_soft, lf));
+		float sw = s_mask * band;
+		if (street_wall_falloff > 0.0) {
+			sw *= 1.0 - exp(-wall_d / street_wall_falloff);  // dies steeply at the wall
+		}
+		sw *= mix(1.0, clamp(att_l, 0.0, 1.0), street_keep_cast_shadows);   // keep cast shadows whole
+		sw *= 1.0 - shadow_edge * street_shadow_edge;        // every shadow keeps its outline
+		// HER shadow keeps its line work: her footprint = a strip from her feet, away from the sun
+		if (street_keep_hero_shadow > 0.0 && is_dir_l && hero_position.y > -50000.0) {
+			vec3 wp_h = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+			vec3 lw = normalize(mat3(INV_VIEW_MATRIX) * LIGHT);              // towards the sun, world
+			vec2 away_h = length(lw.xz) > 0.001 ? -normalize(lw.xz) : vec2(0.0);
+			float len_h = min(street_hero_height * length(lw.xz) / max(lw.y, 0.05), 30.0);
+			vec2 a_h = hero_position.xz;
+			vec2 ab = away_h * len_h;
+			float t_h = clamp(dot(wp_h.xz - a_h, ab) / max(dot(ab, ab), 0.0001), 0.0, 1.0);
+			float d_h = length(wp_h.xz - (a_h + ab * t_h));
+			float in_h = 1.0 - smoothstep(street_hero_shadow_width * 0.6, street_hero_shadow_width, d_h);
+			// only while the sun is really up: with no sun the strip has no shadow to keep and showed as a blob
+			float sun_up_h = smoothstep(0.02, 0.12, lw.y)
+			               * smoothstep(0.02, 0.1, dot(lcol_l, vec3(0.2126, 0.7152, 0.0722)));
+			sw *= 1.0 - in_h * (1.0 - clamp(att_l, 0.0, 1.0)) * street_keep_hero_shadow * sun_up_h * hero_in_sun;
+		}
+		lum = mix(lum, lf, sw * street_cobble_fade);        // the cobbles' relief and joints flatten
+		cob_wear *= 1.0 - sw * street_cobble_fade;
+		flat_cob *= 1.0 - sw * street_cobble_fade;
+		se_ink *= 1.0 - sw * street_cobble_fade;
+		lum += sw * street_line_lift;                        // the lines thin toward paper
+		street_added = sw * street_line_lift * street_keep_tone;
+	}
+
+	// the shade foot shadow, kept as a smooth 0..1 amount and added to the ink AFTER the waterline cut below, so its soft rim
+	// and its fade with height print as tone instead of being cut back to a hard edge (16 Oct 2026)
+	float foot_ink = 0.0;
+	// ---- FOOT SHADOW (a small guaranteed shadow right under her feet; after Street Centre so it never clears) ----
+	if (use_foot_shadow && hero_position.y > -50000.0
+			&& !(foot_shadow_off_when_carrying_lamp && hero_lamp_carried > 0.5)) {
+		vec3 wp_f = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+		float d_f = length(wp_f.xz - hero_position.xz);
+		float near_f = 1.0 - smoothstep(0.3, 0.6, abs(wp_f.y - hero_position.y));      // at her feet's level only
+		float in_f = 1.0 - smoothstep(foot_shadow_radius * (1.0 - foot_shadow_soft), foot_shadow_radius, d_f);
+		lum -= foot_shadow_strength * in_f * near_f * ground_g;
+		// IN SHADE (14 Oct 2026, Orion: "in medium shadow ... I would need that foot drop shadow"): when she stands out of the
+		// sun (the street in tone plate), the foot shadow prints as solid ink -- in the sun it stays the soft one above
+		if (foot_shadow_ink_in_shade && is_dir_l && hero_toe_l.y > -50000.0) {
+			// FOOT-SHAPED (14 Oct 2026, Orion: "more foot shaped so that it disappears when the foot is down"): each sole as a
+			// capsule from heel (ankle) to toe tip, a shoe wide, flat on the street straight under the foot -- a planted shoe
+			// hides it; as the foot lifts it shows beneath. In shade only.
+			float shade_k = 1.0 - clamp(hero_in_sun, 0.0, 1.0);
+			// the body pool first (the foot shadows print over it)
+			if (foot_shadow_body > 0.0) {
+				vec2 fw_b = length(hero_forward) > 0.001 ? normalize(hero_forward) : vec2(0.0, 1.0);
+				vec2 d_b = wp_f.xz - hero_position.xz;
+				vec2 q_b = vec2(dot(d_b, vec2(fw_b.y, -fw_b.x)), dot(d_b, fw_b) / 1.3);   // across, along (stretched)
+				float ang_b = atan(q_b.y, q_b.x);
+				float tb = TIME * foot_shadow_body_wobble_speed;
+				float rb = foot_shadow_body_size * 0.5 * (1.0 + foot_shadow_body_wobble
+				         * (0.55 * sin(3.0 * ang_b + tb * 1.3) + 0.3 * sin(5.0 * ang_b - tb * 0.9 + 1.7) + 0.15 * sin(2.0 * ang_b + tb * 2.1)));
+				float lb = length(q_b);
+				float in_b = 1.0 - smoothstep(rb * (1.0 - foot_shadow_body_soft), rb, lb);
+				foot_ink = max(foot_ink, in_b * foot_shadow_body * near_f * ground_g * shade_k);
+			}
+			float shoe = 0.0;
+			for (int fi = 0; fi < 2; fi++) {
+				vec2 hl = (fi == 0 ? hero_foot_l : hero_foot_r).xz;
+				vec2 tt = (fi == 0 ? hero_toe_l : hero_toe_r).xz;
+				vec2 ab = tt - hl;
+				float h = clamp(dot(wp_f.xz - hl, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+				float r = foot_shadow_shade_size * mix(0.75, 1.0, h);          // a little narrower at the heel
+				// wider the higher this foot is above the street here (ankle height above its planted height)
+				float lift_s = max((fi == 0 ? hero_foot_l : hero_foot_r).y - wp_f.y - foot_shadow_dot_planted, 0.0);
+				float up_s = smoothstep(0.0, foot_shadow_lift_full, lift_s);
+				r *= 1.0 + foot_shadow_lift_spread * up_s;
+				float dd = length(wp_f.xz - (hl + ab * h));
+				float aa_s = max(fwidth(dd), 0.0001);
+				float soft_s = mix(foot_shadow_shade_soft_ground, foot_shadow_shade_soft, up_s);   // crisper near the ground
+				float edge_in = r * (1.0 - soft_s);                            // the soft rim starts here
+				float ink_s = 1.0 - smoothstep(edge_in - aa_s, r + aa_s, dd);
+				float contact_s = mix(1.0, foot_shadow_lift_strength, smoothstep(0.0, foot_shadow_contact, lift_s));
+				shoe = max(shoe, ink_s * contact_s * (1.0 - foot_shadow_lift_fade * up_s));
+				// the trail: takeoff point -> the middle of the foot now, on the street
+				vec4 tr = fi == 0 ? hero_trail_l : hero_trail_r;
+				if (foot_shadow_trail > 0.0 && tr.w > 0.001 && tr.y > -50000.0) {
+					vec2 t0 = tr.xz;
+					vec2 t1 = hl + ab * 0.5;
+					vec2 tv = t1 - t0;
+					float tlen = length(tv);
+					if (tlen > foot_shadow_trail_length) {                      // a jog stride is over a metre: keep the last bit
+						t0 = t1 - tv / tlen * foot_shadow_trail_length;
+						tv = t1 - t0;
+					}
+					float tlen2 = dot(tv, tv);
+					if (tlen2 > 0.0004) {                                       // at least 2 cm long
+						float ht = clamp(dot(wp_f.xz - t0, tv) / tlen2, 0.0, 1.0);
+						float rt = foot_shadow_shade_size * foot_shadow_trail_width * mix(0.25, 1.0, ht);   // tapers to the takeoff
+						float dt = length(wp_f.xz - (t0 + tv * ht));
+						float aat = max(fwidth(dt), 0.0001);
+						float in_t = 1.0 - smoothstep(rt * (1.0 - soft_s) - aat, rt + aat, dt);
+						shoe = max(shoe, in_t * mix(0.25, 1.0, ht) * foot_shadow_trail * tr.w);
+					}
+				}
+			}
+			foot_ink = max(foot_ink, shoe * near_f * ground_g * shade_k);
+		}
+		// FOOT DOTS: a solid round ink dot under EACH foot, full size while the foot is planted, shrinking as it lifts
+		// (Foot Shadow Dot / Dot Lift); district1_setup.gd sends where her feet are. No feet known = one dot at her centre.
+		if (foot_shadow_dot > 0.0) {
+			float dot_f = 0.0;
+			if (hero_foot_l.y > -50000.0) {
+				for (int fi = 0; fi < 2; fi++) {
+					vec3 ft = fi == 0 ? hero_foot_l : hero_foot_r;
+					float lift_f = max(ft.y - wp_f.y - foot_shadow_dot_planted, 0.0);
+					float r_f = foot_shadow_dot * (1.0 - smoothstep(0.0, max(foot_shadow_dot_lift, 0.001), lift_f));
+					float dd_f = length(wp_f.xz - ft.xz);
+					float aa_f = max(fwidth(dd_f), 0.0001);
+					dot_f = max(dot_f, r_f > 0.001 ? 1.0 - smoothstep(r_f - aa_f, r_f + aa_f, dd_f) : 0.0);
+				}
+			} else {
+				float aa_f = max(fwidth(d_f), 0.0001);
+				dot_f = 1.0 - smoothstep(foot_shadow_dot - aa_f, foot_shadow_dot + aa_f, d_f);
+			}
+			lum = mix(lum, -1.0, dot_f * near_f * ground_g);
+		}
+	}
+
+	// ---- WALL SKIRT (line work at the foot of the walls, fading out exponentially) ----
+	if (use_wall_skirt) {
+		float sk_amt = mix(wall_skirt_shadow, wall_skirt_strength, clamp(att_l, 0.0, 1.0));
+		lum -= sk_amt * exp(-wall_d / max(wall_skirt_falloff, 0.01)) * ground_g;
+		cob_wear *= 1.0 - exp(-wall_d / max(wall_skirt_falloff, 0.01)) * ground_g;
+	}
+
+	// ---- EVENING WALLS (Ink Rise from the street / Last Light on the upper floors; by height above the street) ----
+	if ((use_ink_rise || use_last_light) && is_dir_l && ground_height_ready > 0.5) {
+		vec3 wp_e = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+		vec2 uv_e = clamp((wp_e.xz - ground_height_origin) / max(ground_height_size, vec2(0.001)), 0.0, 1.0);
+		float above_e = wp_e.y - texture(ground_height_map, uv_e).r;
+		float wall_e = 1.0 - ground_g;                      // walls and roofs, not the level street
+		float nz_e = blender_noise_fbm(vec3(wp_e.xz * ink_rise_waver_scale, 3.7), 2.0, 0.0) - 0.5;
+		if (use_ink_rise) {
+			// (13 Oct 2026, Orion: "ink rise height should override ink rise strength") the ink's soft edge sits BELOW the
+			// height and the wander never lifts it above, so Height 0 = no ink at all, whatever the Strength
+			float h_e = ink_rise_height + min(nz_e * 2.0 * ink_rise_waver, 0.0) * clamp(ink_rise_height, 0.0, 1.0);
+			float in_e = 1.0 - smoothstep(h_e - 2.0 * ink_rise_soft, h_e + 0.0001, above_e);
+			lum -= ink_rise_strength * in_e * step(0.001, ink_rise_height) * wall_e;
+			if (ink_rise_above > 0.0) {                          // above the line: the lines thicken, fading out upward
+				float up_e = 1.0 - smoothstep(h_e, h_e + ink_rise_above, above_e);
+				lum -= ink_rise_strength * ink_rise_above_amount * up_e * (1.0 - in_e) * step(0.001, ink_rise_height) * wall_e;
+			}
+		}
+		if (use_last_light) {
+			// (13 Oct 2026, Orion) the soft edge runs BOTH ways from the height (a smoother transition), and the wander moves it
+			// up and down. (18 Oct 2026, Orion: "last light height is height not last light off") Height 0 = lifted from the
+			// street up, the whole wall: below one Soft the edge and its wander slide down under the street. Lift 0 = off.
+			float in_l = clamp(last_light_height / max(last_light_soft, 0.01), 0.0, 1.0);
+			float h_l = last_light_height + nz_e * 2.0 * last_light_waver * in_l - last_light_soft * (1.0 - in_l);
+			lum += last_light_lift * smoothstep(h_l - last_light_soft, h_l + last_light_soft + 0.0001, above_e) * wall_e;
+		}
+	}
+	// ---- FAR RESOLVE (far ground settles: paper by day, ink by night) ----
+	if (use_far_resolve && is_dir_l) {
+		float fr = smoothstep(far_start, max(far_end, far_start + 0.01), length(v_view)) * far_strength;
+		if (far_ground_only) {
+			vec3 up_f = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+			fr *= smoothstep(0.85, 0.95, dot(normalize(NORMAL), up_f));
+		}
+		float night_f = internal_night >= 0.0
+			? clamp(internal_night, 0.0, 1.0)                                   // the clock's night
+			: 1.0 - clamp(dot(lcol_l, vec3(0.2126, 0.7152, 0.0722)) / PI / night_day_energy, 0.0, 1.0);
+		float far_t = mix(far_day_tone, far_night_tone, smoothstep(0.0, 1.0, night_f));
+		far_t = mix(far_t, lum, far_keep_shadows * (1.0 - clamp(att_l, 0.0, 1.0)));   // shade stays shade far away
+		lum = mix(lum, far_t, fr);
+		cob_wear *= 1.0 - fr;
+		cob_corner_w *= 1.0 - fr;
+		flat_cob *= 1.0 - fr;
+		se_ink *= 1.0 - fr;
+		street_added *= 1.0 - fr;                            // far away the flat tone has replaced the lift
+	}
+
+	// ---- COBBLE CORNER IN LIGHT (the corners keep at least Corner Darkness: never brighter than 1 - Darkness) ----
+	if (cob_corner_w > 0.0) {
+		float lum_c0 = lum;
+		lum = mix(lum, min(lum, 1.0 - cobble_corner_in_light_darkness), clamp(cob_corner_w * cobble_corner_in_light, 0.0, 1.0));
+		flat_cob += lum - lum_c0;                       // (Flat Round: the corners are the cobbles' too)
+	}
+
+	// ---- NIGHT LIGHTS (baked light map, no real lights) ------
+	float night_add = 0.0;                                  // this pixel's pool light, for the lamplight colour
+	if (use_night_lights && is_dir_l) {
+		vec3 wp = (MODEL_MATRIX * vec4(v_obj, 1.0)).xyz;
+		vec2 muv = (wp.xz - night_map_origin) / max(night_map_size, vec2(0.001));
+		float sun_e = dot(lcol_l, vec3(0.2126, 0.7152, 0.0722)) / PI;
+		float night = 1.0 - clamp(sun_e / night_day_energy, 0.0, 1.0);
+		if (night_lights_gate >= 0.0) {                     // by the clock (district1_setup.gd: Night Lights Hours)
+			night = clamp(night_lights_gate, 0.0, 1.0);
+		}
+		lum += night * night_base;
+		if (muv.x >= 0.0 && muv.x <= 1.0 && muv.y >= 0.0 && muv.y <= 1.0) {
+			vec4 L = texture(night_light_map, muv);
+			if (L.r > 0.0 && night > 0.0) {
+				vec3 up_nl = normalize((VIEW_MATRIX * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+				float ground_w = smoothstep(0.5, 0.9, dot(n, up_nl));
+				float src_h = night_height_base + L.b * night_height_range;
+				float wall_w = (1.0 - smoothstep(0.0, night_wall_falloff, abs(wp.y - src_h))) * night_wall_amount;
+				float f;
+				if (flicker_source == 1) {
+					f = texture(flicker_tex, vec2(L.g, TIME * flicker_speed)).r;
+				} else {
+					float t = TIME * flicker_speed * 6.28318;
+					f = 0.5 + 0.25 * sin(t + L.g * 40.0) + 0.15 * sin(t * 2.3 + L.g * 91.0)
+					        + 0.10 * sin(t * 5.1 + L.g * 17.0);
+				}
+				float k = mix(1.0, f, flicker_amount * flicker_gate);
+				night_add = night * night_strength * L.r * mix(wall_w, 1.0, ground_w) * k;
+				lum += night_add;
+			}
+		}
+	}
+
+	// ---- TREE SHADOW (baked map: the ground under the trees, when the Sun gives none) ----
+	if (use_tree_shadow && is_dir_l && ground_g > 0.0) {
+		vec3 wp_t = (MODEL_MATRIX * vec4(v_obj, 1.0)).xyz;
+		vec2 tuv = (wp_t.xz - night_map_origin) / max(night_map_size, vec2(0.001));
+		if (tuv.x >= 0.0 && tuv.x <= 1.0 && tuv.y >= 0.0 && tuv.y <= 1.0) {
+			float sun_t = dot(lcol_l, vec3(0.2126, 0.7152, 0.0722)) / PI;
+			float dark_t = mix(1.0 - clamp(sun_t / night_day_energy, 0.0, 1.0), 1.0, tree_shadow_in_sun);
+			float near_t = tree_shadow_fade_near > 0.0
+				? smoothstep(tree_shadow_fade_near, tree_shadow_fade_near + 6.0, length(v_view)) : 1.0;
+			vec2 tsm = texture(tree_shadow_map, tuv).rg;
+			// (a map from before 18 Oct has G = 0 everywhere: Trunk all over, as it always looked)
+			float grad_t = mix(tree_shadow_trunk, tree_shadow_rim, pow(clamp(tsm.g, 0.0, 1.0), tree_shadow_curve));
+			lum -= tree_shadow_strength * tsm.r * grad_t * dark_t * near_t * ground_g;
+		}
+	}
+
+	// ---- BIAS LOBE -------------------------------------------
+	float lobe_w = 0.0;
+	if (use_bias_lobe) {
+		float third = obj_axis == 1 ? v_obj.y
+		            : obj_axis == 2 ? v_obj.x
+		            : -v_obj.z;
+		vec3 lp = vec3(obj_c - pattern_center, third * object_scale_comp);
+		float lr = length(lp);
+		vec3 ln = lp / max(lr, 0.0001);
+		float az = radians(bias_azimuth);
+		float el = radians(bias_elevation);
+		vec3 ldir = vec3(cos(el) * cos(az), cos(el) * sin(az), sin(el));
+		float sp = max(bias_spread, 0.05);
+		lobe_w = pow(max(dot(ln, ldir), 0.0), 1.0 / (sp * sp));
+		if (bias_reach > 0.00001) {
+			lobe_w *= 1.0 - smoothstep(bias_reach * 0.8, bias_reach, lr);
+		}
+		if (bias_hollow > 0.00001) {
+			lobe_w *= smoothstep(0.0, bias_hollow, lr);
+		}
+		lum += lobe_w * bias_amount;
+	}
+
+	// ---- BIAS LID ----------------------------------------------
+	float lid_w = 0.0;
+	float lid_light_add = 0.0;
+	float lid_h = 0.0;
+	vec3 lid_q = vec3(0.0);   // position on the eyeball, kept for the cornea cut
+	if (use_lid && lid_close > 0.0) {
+		vec3 q = lid_frame(v_obj) - lid_center;
+		lid_q = q;
+		vec3 pole;
+		mat4 inv_model = inverse(MODEL_MATRIX);
+		if (lid_light.w < 0.0) {
+			// no key light written yet: this scene light's own direction
+			vec3 lw = (INV_VIEW_MATRIX * vec4(LIGHT, 0.0)).xyz;
+			pole = normalize(lid_frame((inv_model * vec4(lw, 0.0)).xyz));
+		} else {
+			vec3 lm = (inv_model * lid_light).xyz;
+			// lid_frame is its own inverse, so the globe centre in model space is lid_frame(lid_center)
+			pole = lid_light.w > 0.5 ? normalize(lid_frame(lm) - lid_center)
+			                          : normalize(lid_frame(lm));
+		}
+		// height along the light axis, -1 .. +1 across the globe; the leading
+		// edge is a LINE OF LATITUDE and the lid comes down from the light side
+		float s = dot(q, pole) / max(lid_radius, 0.0001);
+		float edge = 1.0 - 2.0 * lid_close;
+		float sw = max(lid_softness, 0.0001);
+		lid_w = smoothstep(edge - sw, edge + sw, s);
+		if (lid_grain > 0.0) {
+			// burnish-style grit: a random value per 3D cell on the eyeball, and the
+			// cell is under the lid when the lid's strength there beats it
+			float g = hash31(floor(q / max(lid_radius, 0.0001) * lid_grain_scale));
+			lid_w = mix(lid_w, step(g, lid_w), lid_grain);
+		}
+		// Affect Left / Right: the lid weakens on the eye the slider moves away from
+		float side_k = v_lid_side > 0.5 ? clamp(1.0 - lid_affect_left_right, 0.0, 1.0)
+		             : v_lid_side < -0.5 ? clamp(1.0 + lid_affect_left_right, 0.0, 1.0)
+		             : 1.0;
+		lid_w *= side_k;
+		lum -= lid_w * lid_darkness;
+		// 0 at the bottom of the eyeball, 1 at the top (light side)
+		lid_h = clamp(s * 0.5 + 0.5, 0.0, 1.0);
+		if (lid_curve_exposure > 0.0) {
+			lid_light_add = texture(lid_light_curve, vec2(lid_h, 0.5)).r
+			              * lid_curve_exposure * (1.0 - lid_w);
+			lum += lid_light_add;
+		}
+	}
+
+	// ---- TONAL GRADIENT --------------------------------------
+	if (grad_amount != 0.0) {
+		float gx = grad_horizontal ? SCREEN_UV.x : SCREEN_UV.y;
+		float g = texture(grad_tex, vec2(gx, 0.5)).r;
+		lum += (g - 0.5) * 2.0 * grad_amount;
+	}
+
+	// ---- GLARE (adds luminance, thins ink) --------------------
+	if (use_glare && glare_boost > 0.0) {
+		vec2 bp = coord - glare_center;
+		float b;
+		if (glare_type == 1) {
+			b = pat_glare(bp, glare_count, glare_len, glare_sharp);
+		} else {
+			// even-width spokes, faded out by glare_len
+			float ba = atan(bp.y, bp.x);
+			b = sin(ba * glare_count) * 0.5 + 0.5;
+			b *= clamp(1.0 - length(bp) / max(glare_len, 0.0001), 0.0, 1.0);
+		}
+		lum += b * glare_boost;
+	}
+
+	// the light before roughness: the tone plate's From Lines waterline reads this, because
+	// it stretches lum by 1 / (1 - cut level) and would blow the roughness speckle up with it
+	float lum_pre_rough = lum;
+
+	// ---- SEA ROUGHNESS (line edge noise) ----------------------
+	float rough_sample = 0.0;
+	if (use_roughness && roughness_amount > 0.0) {
+		vec2 rough_c = mix(SCREEN_UV, obj_c, rough_pov_win_to_obj);
+		rough_sample = roughness_field == 1
+			? (use_noise_lod ? blender_noise_fbm_lod(vec3(rough_c * roughness_scale + boil_n * 1.3, 0.0),
+			                                         roughness_detail, roughness_distortion, noise_lod_px)
+			                 : blender_noise_fbm(vec3(rough_c * roughness_scale + boil_n * 1.3, 0.0),
+			                                     roughness_detail, roughness_distortion))
+			: texture(roughness_tex, rough_c * roughness_scale + boil_n * 1.3).r;
+		float rough_delta = roughness_add_only
+			? -rough_sample * roughness_amount
+			: (rough_sample - 0.5) * roughness_amount;
+		if (rough_fade) {
+			// metres (or screen units) per pixel of the grain's own coordinate
+			float upp = (anti_moire_smooth && use_anti_moire && rough_pov_win_to_obj > 0.999 && pattern_pov_cam_to_obj > 0.999
+			             && pattern_pov_win < 0.001)
+				? max(length(dcoord_x), length(dcoord_y))          // same units as rough_c (both obj_c)
+				: max(length(dFdx(rough_c)), length(dFdy(rough_c)));
+			float cell_px = 1.0 / max(roughness_scale * upp, 0.000001);
+			float keep_r = smoothstep(rough_fade_px_min, max(rough_fade_px_max, rough_fade_px_min + 0.001), cell_px);
+			float mean_d = roughness_add_only ? -0.5 * roughness_amount : 0.0;
+			rough_delta = mix(mean_d, rough_delta, keep_r);
+		}
+		// washout: scale by the line width left, (1 - lum) / washout
+		if (roughness_washout > 0.00001) {
+			rough_delta *= clamp((1.0 - lum) / roughness_washout, 0.0, 1.0);
+		}
+		lum += rough_delta;
+	}
+
+	lum += cob_wear;                          // cobbles' worn middles: the lines thin and break there (0 when off)
+
+	// ---- FLAT SPREAD (Flat: an uneven ink line -- higher at the walls, varying in patches) ----
+	if (ptype_l == 5 && flat_spread > 0.0) {
+		vec3 wp_fs = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+		float walls_fs = exp(-wall_d / max(flat_spread_wall_metres, 0.01));                 // 1 at a wall .. 0 far out
+		float patch_fs = blender_noise_fbm(vec3(wp_fs.xz / max(flat_spread_patch_metres, 0.01), 7.3), 2.0, 0.0);
+		float field_fs = mix(patch_fs, walls_fs, flat_spread_walls);                      // 0 .. 1
+		pattern += flat_spread * (field_fs - 0.5) * 2.0 * (1.0 - ink_flood);
+	}
+
+	// ---- FLAT EDGE (Flat: the ink's edge breaks into lines, only within Flat Edge Px of it) ----
+	// only where a SHADOW's edge is (the cast shadow changing from pixel to pixel) -- not the cobbles' joints, not a
+	// slow mid-shade. Flat Edge Px: how readily a soft shadow edge counts (higher = wider fringe on blurred edges)
+	float edge_w = clamp(fwidth(att_l) * 8.0, 0.0, 1.0);              // 1 on a cast shadow's edge, 0 elsewhere
+	if (ptype_l == 5 && flat_edge_band > 0.0) {
+		float band_f = min(flat_edge_band, flat_edge_px * fwidth(lum_pre_rough)) * edge_w;   // ~Flat Edge Px wide
+		float e_f = flat_edge_pattern_at(coord, wob, gauge);
+		pattern += (1.0 - ink_flood) * band_f * (e_f * 2.0 - 1.0);
+	}
+
+	// ---- THE WATERLINE ---------------------------------------
+	float ink = step(lum, pattern);
+	if (ptype_l == 5 && (flat_round_cobbles > 0.0 || flat_round_soft_px > 0.0)) {
+		// FLAT ROUND: the ink's edge from the light without the cobbles (Round Cobbles), eased over Soft Px
+		float dwl_r = pattern - (lum - flat_round_cobbles * (flat_cob + cob_wear));
+		float w_r = max(fwidth(dwl_r) * flat_round_soft_px * 0.5, 0.00001);
+		ink = flat_round_soft_px > 0.0 ? smoothstep(-w_r, w_r, dwl_r) : step(0.0, dwl_r);
+	}
+	ink = max(ink, foot_ink);                            // the shade foot shadow, soft (see FOOT SHADOW)
+	if (use_edge_aa) {
+		float dwl = pattern - lum;                         // > 0 = ink side of the waterline
+		float w = max(fwidth(dwl) * edge_aa_width * 0.5, 0.00001);
+		ink = smoothstep(-w, w, dwl);
+	}
+
+	// cross-hatch only in deep shadow
+	if (use_cross) {
+		// the cross arm's own sea level, derived from the main one
+		float cross_lum = remap(lum, cross_in_min, cross_in_max,
+		                        cross_out_min, cross_out_max);
+		if (cross_clamp) {
+			cross_lum = clamp(cross_lum, 0.0, 1.0);
+		}
+		cross_lum += cross_bias;
+
+		if (cross_grad_amount != 0.0) {
+			float cgx = cross_grad_horizontal ? SCREEN_UV.x : SCREEN_UV.y;
+			float cg = texture(cross_grad_tex, vec2(cgx, 0.5)).r;
+			cross_lum += (cg - 0.5) * 2.0 * cross_grad_amount;
+		}
+
+		float cross_gate = step(lum, cross_threshold);
+		ink = max(ink, step(cross_lum, cross) * cross_gate);
+	}
+
+	// ---- SCUMBLE (white cross-hatch, cuts ink away) -----------
+	// amt ramps 0 -> 1 across the top of the luminance range, so the
+	// cuts WIDEN as the area gets brighter.
+	float scumble_cut = 0.0;
+	if (use_scumble && scumble_amount > 0.0) {
+		// One noise sample drives both spacing and width irregularity.
+		vec2 sc_c = mix(view_c, obj_c, scumble_pov_cam_to_obj);
+		float sn = texture(scumble_tex,
+		                   sc_c * scumble_var_scale).r - 0.5;
+
+		// spacing: the noise displaces the coordinate before the sine
+		// divided by scumble_scale so the dial reads as a fraction of
+		// cut spacing rather than as a raw world displacement
+		float scum = hatch(sc_c, scumble_scale * gauge, scumble_angle,
+		                   sn * scumble_wobble * 6.28318
+		                   / max(scumble_scale, 0.0001));
+
+		// width: the same noise shifts the threshold
+		float amt = smoothstep(1.0 - scumble_amount, 1.0, lum);
+		float w   = (scumble_width + sn * scumble_wobble) * amt;
+		scumble_cut = step(clamp(1.0 - w, 0.0, 1.0), scum);
+		if (use_anti_moire && anti_moire_extras) {
+			// cut period on screen, from the scumble coordinate's change per pixel
+			float sph = rotate2d(sc_c, scumble_angle).x * scumble_scale * gauge;
+			float s_px = 6.28318 / max(length(vec2(dFdx(sph), dFdy(sph))), 0.000001);
+			float keep_s = smoothstep(fade_px_min, max(fade_px_max, fade_px_min + 0.001), s_px);
+			// the share of a sine period above 1 - w: what the cuts remove on average
+			float avg_s = acos(clamp(1.0 - 2.0 * clamp(w, 0.0, 1.0), -1.0, 1.0)) / 3.14159;
+			scumble_cut = mix(avg_s, scumble_cut, keep_s);
+		}
+		ink *= 1.0 - scumble_cut;
+	}
+
+	// ---- CORNEA CUT (paper cuts above the lower lid) ---------
+	float cornea_cut = 0.0;
+	float cornea_h = 0.0;
+	if (use_cornea_cut) {
+		// the eyeball's own up/down (lid frame Y = the eye's up), NOT the light
+		vec3 cq = lid_frame(v_obj) - lid_center;
+		cornea_h = clamp(cut_lat(cq / max(lid_radius, 0.0001)) * 0.5 + 0.5, 0.0, 1.0);
+		float g = hash31(floor(cq / max(lid_radius, 0.0001) * cornea_cut_break_scale));
+		if (use_cornea_curve) {
+			// a spike is a cut; break makes weaker parts of it print as dashes
+			float v = texture(cornea_cut_curve, vec2(cornea_h, 0.5)).r;
+			cornea_cut = step(mix(0.5, g, cornea_cut_break), v);
+		} else {
+			int n = clamp(cornea_cut_count, 1, 3);
+			float d = 10.0;
+			for (int ci = 0; ci < 3; ci++) {
+				if (ci >= n) {
+					break;
+				}
+				// evenly spread across the band, centred on cornea_cut_height
+				float c = cornea_cut_height
+				        + (n > 1 ? (float(ci) / float(n - 1) - 0.5) * 2.0 * cornea_cut_band : 0.0);
+				d = min(d, abs(cornea_h - c));
+			}
+			cornea_cut = step(d, cornea_cut_width * 0.5);
+			if (cornea_cut_break > 0.0) {
+				cornea_cut *= step(cornea_cut_break, g);
+			}
+		}
+		ink *= 1.0 - cornea_cut;
+	}
+
+	// ---- GLEAM WEDGE (wide head, exponential tail) ------------
+	if (use_gleam_wedge) {
+		vec3 wq = (lid_frame(v_obj) - lid_center) / max(lid_radius, 0.0001);
+		float wh = clamp(cut_lat(wq) * 0.5 + 0.5, 0.0, 1.0);
+		// distance along the tail from the head (eyeball radii); the head end
+		// closes 8x faster so it reads as a blunt start, not a second tail
+		float along = (wq.x - wedge_start) * (wedge_direction == 0 ? 1.0 : -1.0);
+		float rate = along >= 0.0 ? wedge_taper : wedge_taper * 8.0;
+		float half_w = 0.5 * wedge_width * exp(-rate * abs(along));
+		float wedge = step(abs(wh - wedge_height), half_w);
+		cornea_cut = max(cornea_cut, wedge);
+		ink *= 1.0 - wedge;
+	}
+
+	// ---- BURNISH (grit wear at the highlight) -----------------
+	// Placed after scumble so it erodes the scumble marks too.
+	float burnish_wear = 0.0;
+	if (use_burnish && burnish_amount > 0.0) {
+		// 3D coordinate, so grit cells are cubes rather than columns
+		vec3 bc = mix(v_view, v_obj * object_scale_comp,
+		              burnish_pov_cam_to_obj);
+		float grit = hash31(floor(bc * burnish_grit));
+		// 0 below the reach, 1 at peak luminance
+		float near_peak = smoothstep(1.0 - burnish_reach, 1.0,
+		                             clamp(lum, 0.0, 1.0));
+		burnish_wear = step(grit,
+		                    near_peak * burnish_amount * burnish_gain);
+		if (use_anti_moire && anti_moire_extras) {
+			// grit cell size on screen
+			float b_px = 1.0 / max(burnish_grit * max(length(dFdx(bc)), length(dFdy(bc))), 0.000001);
+			float keep_b = smoothstep(fade_px_min, max(fade_px_max, fade_px_min + 0.001), b_px);
+			burnish_wear = mix(clamp(near_peak * burnish_amount * burnish_gain, 0.0, 1.0), burnish_wear, keep_b);
+		}
+		ink *= 1.0 - burnish_wear;
+	}
+
+	// ---- PAPER TOOTH (bites in, and draws ink out) ------------
+	float tooth = 1.0;
+	if (use_tooth && tooth_amount > 0.0) {
+		vec2 tooth_c = rotate2d(mix(view_c, obj_c, tooth_pov_cam_to_obj),
+		                        tooth_angle);
+		tooth_c.y *= tooth_aspect;
+		bool tooth_v = tooth_field == 1;
+		float t = tooth_v
+			? voronoi_edge3(vec3(tooth_c * tooth_scale + boil_n * 0.7, 0.0), tooth_randomness)
+			: texture(tooth_tex, tooth_c * tooth_scale + boil_n * 0.7).r;
+
+		// signed distance from the waterline
+		//   d > 0  inside the stroke      d < 0  out on the paper
+		float d = pattern - lum;
+
+		// tonal window - full strength between the two spares,
+		// fading out below the first and above the second
+		float L = clamp(lum, 0.0, 1.0);
+		float tilt =
+			smoothstep(tooth_dark_spare,
+			           tooth_dark_spare + tooth_spare_blend, L)
+			* (1.0 - smoothstep(tooth_light_spare - tooth_spare_blend,
+			                    tooth_light_spare, L));
+		// DISTANCE (10 Oct 2026, Orion: tooth adds white noise in the distance): fades out between Far Start
+		// and Far End (metres from the camera). Far End at or below Far Start = no distance limit.
+		if (tooth_far_end > tooth_far_start) {
+			tilt *= 1.0 - smoothstep(tooth_far_start, tooth_far_end, length(v_view));
+		}
+
+		// --- bite IN: white wedges eating into the stroke ---
+		float grip_in = 1.0;
+		if (tooth_depth_in > 0.0) {
+			grip_in = 1.0 - smoothstep(0.0, tooth_depth_in, max(d, 0.0));
+		}
+		// grip shifts the THRESHOLD, not the result - keeps it binary
+		float bite_k = tooth_threshold * tooth_amount * grip_in * tilt;
+		if (use_noise_lod) {
+			// NOISE PIXEL LOD: tooth cells smaller than Noise LOD Px fade out (sub-pixel bites are static as she moves)
+			vec2 tcs = tooth_c * tooth_scale;
+			float tooth_px = 1.0 / max(max(length(dFdx(tcs)), length(dFdy(tcs))), 0.000001);
+			bite_k *= smoothstep(noise_lod_px * 0.5, noise_lod_px, tooth_px);
+		}
+		tooth = step(bite_k, t);
+		if (use_tooth_aa) {
+			// soft fibre edge over edge_aa_width px (same width as Edge AA)
+			float dt = t - bite_k;
+			float wt = max(fwidth(dt) * edge_aa_width * 0.5, 0.00001);
+			tooth = smoothstep(-wt, wt, dt);
+		}
+		// spared / out of range: no bite at all, even on the field's zeros
+		tooth = bite_k > 0.0 ? tooth : 1.0;
+		ink *= tooth;
+
+		// --- draw OUT: ink pulled along the fibre past the edge ---
+		if (tooth_depth_out > 0.0) {
+			// mode 1: the Blender port's honest units (REACH 0.25) and
+			// the field normalised by its real top (0.5)
+			float reach = tooth_v ? tooth_depth_out * 0.25 : tooth_depth_out;
+			float t_out = tooth_v ? clamp(t / mix(0.5, 0.2, tooth_out_boost), 0.0, 1.0) : t;
+			float out_d = max(-d, 0.0);
+			if (tooth_out_gap) {
+				// 0 at the stroke edge, 1 halfway to the next line (pattern bottoms out at ink_flood)
+				out_d = clamp(out_d / max(lum - ink_flood, 0.02), 0.0, 1.0);
+				reach = tooth_depth_out;
+			}
+			float grip_out = 1.0
+			               - smoothstep(0.0, reach, out_d);
+			// only outside the stroke, and only where fibre is high
+			float bleed = step(1.0 - tooth_amount * grip_out * tilt, t_out)
+			            * step(d, 0.0);
+			if (use_tooth_aa) {
+				float db = t_out - (1.0 - tooth_amount * grip_out * tilt);
+				float wb = max(fwidth(db) * edge_aa_width * 0.5, 0.00001);
+				bleed = smoothstep(-wb, wb, db) * step(d, 0.0);
+			}
+			// SPARED MEANS NONE (10 Oct 2026, Orion: tooth noise in the brights whatever Light Spare was):
+			// with the strength at 0 the threshold is exactly 1, and the field -- clamped to 1, and often AT 1
+			// with Out Boost -- still met it, printing specks in spared lights and beyond the reach. Gate it.
+			bleed *= step(0.0001, tooth_amount * grip_out * tilt);
+			ink = max(ink, bleed);
+		}
+	}
+
+	// ---- STIPPLE (adds clumped dots for stone / brick) --------
+	// Placed LAST, after tooth and burnish, so nothing erodes the
+	// dots. They are raised grains on the wall, not printed marks -
+	// they survive highlights, wear and paper texture alike.
+	float stipple_dots = 0.0;
+	if (use_stipple && stipple_coverage > 0.0) {
+		vec2 sc = mix(view_c, obj_c, stipple_pov_cam_to_obj);
+
+		// Warp the coordinate before sampling. Quantised into blocks
+		// so marks translate rigidly rather than shearing.
+		if (stipple_warp > 0.0 || stipple_warp_rotate > 0.0) {
+			vec2 blk = floor(sc * stipple_scale * stipple_warp_cells);
+
+			// rotate about the block centre, so the block does not
+			// also swing sideways as it turns
+			if (stipple_warp_rotate > 0.0) {
+				vec2 ctr = (blk + 0.5)
+				         / max(stipple_scale * stipple_warp_cells, 0.0001);
+				float ang = (hash21(blk + vec2(7.3, 11.9)) - 0.5)
+				          * 2.0 * stipple_warp_rotate;
+				sc = ctr + rotate2d(sc - ctr, ang);
+			}
+
+			vec2 wv = vec2(hash21(blk),
+			               hash21(blk + vec2(19.7, 43.1))) - 0.5;
+			sc += wv * stipple_warp / max(stipple_scale, 0.0001);
+		}
+
+		float s1 = texture(stipple_tex, sc * stipple_scale).r;
+		float s2 = texture(stipple_tex,
+		                   sc * stipple_scale * stipple_clump_scale).r;
+		if (stipple_invert) {
+			s1 = 1.0 - s1;
+			s2 = 1.0 - s2;
+		}
+		float clump = s1 * mix(1.0, s2, stipple_clump);
+		// sharpening the field shrinks marks without moving cells
+		clump = pow(clamp(clump, 0.0, 1.0), stipple_falloff);
+		float cov = stipple_coverage
+		            * mix(1.0, 1.0 - clamp(lum, 0.0, 1.0),
+		                  stipple_lum_response);
+		stipple_dots = step(1.0 - cov, clump);
+
+		if (stipple_flip) {
+			// the clump field dithers the changeover so it does not
+			// land as a clean contour across the wall
+			float pivot = stipple_pivot
+			            + (clump - 0.5) * stipple_flip_blend;
+			float lit = step(pivot, clamp(lum, 0.0, 1.0));
+			// dark specks in light
+			ink = max(ink, stipple_dots * lit);
+			// light specks in shade
+			ink *= 1.0 - stipple_dots * (1.0 - lit);
+		} else {
+			ink = max(ink, stipple_dots);
+		}
+	}
+
+	// ---- TONE PLATE (brown block, highlights cut to cream) ----
+	float tone = 0.0;                                   // 1 = brown printed, 0 = cut to cream
+	vec3 paper = paper_color;
+	if (use_tone_plate && !(v_surface && pattern_type == 5 && !villain_flat_tone_plate)) {
+		float cut_at = tone_cut_level - tone_cut_material * 1.5;
+		float lum_t = (tone_cut_mode == 2 ? lum_pre_rough : lum) - street_added;   // Street Centre clears lines, not tone
+		float grain_d = 0.0;                                // Grain / From Lines speckle
+		if (tone_cut_mode == 0) {
+			if (tone_edge_noise > 0.0) {
+				float tn = blender_noise_fbm(vec3(coord * tone_edge_scale, 0.0), 2.0, 0.0);
+				cut_at += (tn - 0.5) * 2.0 * tone_edge_noise;
+			}
+		} else if (tone_grain_amount > 0.0) {
+			// the Sea Roughness field, sampled whether roughness is on or not,
+			// and with no washout (washout is what clears roughness near lum 1)
+			vec2 gc = mix(SCREEN_UV, obj_c, rough_pov_win_to_obj) * roughness_scale * tone_grain_scale;
+			float gs = roughness_field == 1
+				? blender_noise_fbm(vec3(gc, 0.0), roughness_detail, roughness_distortion)
+				: texture(roughness_tex, gc).r;
+			grain_d = (gs - 0.5) * 2.0 * tone_grain_amount;
+			// (10 Oct 2026, Orion: the grain left a thin line in bright light) the grain belongs to the
+			// brown-to-cream change, not to full light: strongest at the cut level, gone by full light
+			float lit_f = clamp((lum_t - cut_at) / max(1.0 - cut_at, 0.05), 0.0, 1.0);
+			grain_d *= 1.0 - smoothstep(0.6, 1.0, lit_f);
+			if (tone_cut_mode == 1) {
+				lum_t += grain_d;
+			}
+		}
+		if (tone_cut_mode == 2) {
+			// a second waterline on the hatching: how far into each gap the cream reaches,
+			// 0 at the cut level, the whole gap at lum 1. The grain goes on AFTER the
+			// stretch, so Tone Grain Amount means the same as in Grain mode
+			float reach0 = (lum_t - cut_at) / max(1.0 - cut_at, 0.05);
+			float reach = reach0 + grain_d;
+			float s = tone_cut_soft + 0.0001;
+			float tl = tone_line_scale * gauge;
+			float pt = make_pattern(ptype_l, coord, wob, tl);          // un-faded hatching
+			float t_lines = tone_lines_from_ink
+				? 1.0 - smoothstep(1.0 - reach - s, 1.0 - reach + s, pt)
+				: smoothstep(reach - s, reach + s, pt);
+			float t_grain = 1.0 - smoothstep(cut_at - tone_cut_soft, cut_at + tone_cut_soft + 0.0001, lum_t + grain_d);
+			float t_fade = 0.0;
+			if (use_anti_moire && ptype_l != 5) {        // (Flat: no hatching to fade -- it shifted the shade's edge with distance)
+				float ph = rotate2d(coord - pattern_center, line_angle).x * wave_scale * tl;
+				float rpx = anti_moire_smooth
+					? length(vec2(rotate2d(dcoord_x, line_angle).x, rotate2d(dcoord_y, line_angle).x)) * wave_scale * tl
+					: length(vec2(dFdx(ph), dFdy(ph)));
+				float per = 6.28318 / max(rpx, 0.000001);
+				t_fade = 1.0 - smoothstep(fade_px_min, max(fade_px_max, fade_px_min + 0.001), per);
+			}
+			tone = mix(t_lines, t_grain, t_fade);
+			// full light = no brown at all (the stripes' last hairline sat on the hatching's peaks)
+			tone *= 1.0 - smoothstep(0.96, 1.0, reach0);
+		} else {
+			tone = 1.0 - smoothstep(cut_at - tone_cut_soft, cut_at + tone_cut_soft + 0.0001, lum_t);
+		}
+		paper = mix(paper_color, tone_color, tone);
+		// Corner In Tone: the cobble corners print darker on the brown (mid tones), nothing where it is cut to cream
+		if (cobble_corner_in_tone > 0.0 && cob_corner_w > 0.0) {
+			paper = mix(paper, ink_color, clamp(cob_corner_w, 0.0, 1.0) * tone * cobble_corner_in_tone);
+		}
+		// Street Edges Keep In Tone: the joints, lips and gravel specks print darker on the brown (shade, mid tones)
+		if (street_edges_in_tone > 0.0 && se_ink > 0.0) {
+			paper = mix(paper, ink_color, clamp(se_ink, 0.0, 1.0) * tone * street_edges_in_tone);
+		}
+		ink *= mix(1.0, tone, tone_clear_ink);
+	}
+
+	// ---- LABELS (the collage printed faintly into the paper) --
+	vec3 label_dbg = vec3(0.6, 0.0, 0.0);                  // debug views 17 / 18 (red = labels off)
+	if (use_labels) {
+		float sd = v_pseed.x;
+		vec2 lp = v_panel;                                    // where on its panel (metres)
+		if (label_world_sheets) {                             // sheets laid on the ground by world position
+			vec3 wpl = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+			vec2 q = wpl.xz / max(label_sheet_m, 0.01);
+			q.x += hash21(vec2(floor(q.y), 4.7));             // each row shifted, like laid paper
+			vec2 cl = floor(q);
+			lp = (fract(q) - 0.5) * label_sheet_m;
+			sd = hash21(cl + vec2(0.37, 1.91));
+		}
+		float ang = (hash21(vec2(sd, 1.31)) * 2.0 - 1.0) * radians(label_rotate);
+		vec2 pr = vec2(lp.x * cos(ang) - lp.y * sin(ang), lp.x * sin(ang) + lp.y * cos(ang));
+		vec2 ts = vec2(textureSize(label_tex, 0));
+		float aspect = ts.x / max(ts.y, 1.0);
+		float size_k = pow(1.0 + label_size_var, hash21(vec2(sd, 5.1)) * 2.0 - 1.0);   // 1/(1+v) .. (1+v)
+		vec2 luv = vec2(pr.x, -pr.y * aspect) / (label_size * size_k)
+		         + vec2(hash21(vec2(sd, 7.7)), hash21(vec2(sd, 3.9)));          // this panel's piece of the collage
+		int sheet = label_sheet > 0 ? label_sheet - 1
+		          : int(floor(hash21(vec2(sd, 11.3)) * float(clamp(label_sheets, 1, 4))));
+		vec3 lc = sheet == 1 ? texture(label_tex_2, luv).rgb
+		        : sheet == 2 ? texture(label_tex_3, luv).rgb
+		        : sheet == 3 ? texture(label_tex_4, luv).rgb
+		        :              texture(label_tex, luv).rgb;
+		float ll = dot(lc, vec3(0.2126, 0.7152, 0.0722));
+		float dark = clamp((1.0 - ll) * label_contrast, 0.0, 1.0);             // the print: text and pictures
+		float wear = blender_noise_fbm(vec3(lp * label_erosion_scale, sd * 17.0), 3.0, 0.0);
+		float keep = smoothstep(label_erosion - label_erosion_soft, label_erosion + label_erosion_soft, wear);
+		paper *= 1.0 - label_strength * keep * dark;
+		label_dbg = debug_view == 18 ? vec3(fract(lp), fract(sd * 7.0))      // panel UVs: 1 m tiles, hue per panel
+		                             : lc * mix(1.0, 0.35, 1.0 - keep);                // the collage itself, worn patches dimmed
+	}
+
+	// ---- LAMPLIGHT (the night pools tint the paper) -------------
+	if (night_glow > 0.0 && night_add > 0.0) {
+		paper = mix(paper, night_glow_color.rgb, clamp(night_add * night_glow, 0.0, 1.0));
+	}
+
+	// ---- AQUATINT (tone in the paper) -------------------------
+	float aq = 1.0;
+	if (use_aquatint && aquatint_amount > 0.0) {
+		vec2 aqua_c = mix(SCREEN_UV, obj_c, aqua_pov_win_to_obj);
+		float a = texture(aquatint_tex, aqua_c * aquatint_scale).r;
+		aq = mix(1.0, step(aquatint_threshold, a), aquatint_amount);
+		paper *= aq;
+	}
+
+	// ---- SURFACE PAPER (this sheet's own cut of the scan and its own tone, fixed to the surface) ----
+	vec3 ink_sp = ink_color;
+	if (use_surface_paper) {
+		vec3 wp_sp = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+		float sd_sp = v_pseed.x;              // one random number per panel
+		vec2 lp_sp = v_panel;                 // where on its panel (metres)
+		float edge_sp = 1.0;
+		if (bp_world_sheets) {
+			vec3 wn_sp = normalize(mat3(INV_VIEW_MATRIX) * NORMAL);
+			vec2 w2_sp = wp_sp.xz;                            // floors: a level grid
+			if (abs(wn_sp.y) < 0.7) {
+				// cross(up, wn_sp) written out: light() has a local `cross` (the cross-hatch) that hides the function
+				vec3 ac_sp = normalize(vec3(wn_sp.z, 0.0, -wn_sp.x));
+				w2_sp = vec2(dot(wp_sp, ac_sp), wp_sp.y);     // walls: along the wall, up the wall
+			}
+			vec2 q_sp = w2_sp / bp_sheet_m;
+			q_sp.x += hash21(vec2(floor(q_sp.y), 4.7));       // each row shifted, like laid paper
+			vec2 cl_sp = floor(q_sp);
+			sd_sp = hash21(cl_sp + vec2(0.37, 1.91)) + (abs(wn_sp.y) < 0.7 ? 0.5 : 0.0);
+			lp_sp = w2_sp;                                    // continuous; the sheet's own offset goes in below
+			vec2 fq_sp = fract(q_sp);
+			float de_sp = min(min(fq_sp.x, 1.0 - fq_sp.x), min(fq_sp.y, 1.0 - fq_sp.y)) * bp_sheet_m;
+			edge_sp = 1.0 - bp_sheet_edge * (1.0 - smoothstep(0.0, bp_sheet_edge_m, de_sp));
+		}
+		float ang_sp = hash21(vec2(sd_sp, 2.3)) * 6.28318;
+		mat2 r_sp = mat2(vec2(cos(ang_sp), sin(ang_sp)), vec2(-sin(ang_sp), cos(ang_sp)));
+		vec2 uv_sp = r_sp * lp_sp / bp_paper_m + vec2(hash21(vec2(sd_sp, 7.7)), hash21(vec2(sd_sp, 3.9)));
+		// the gradients of the continuous coordinate: no mip seams where one sheet meets the next
+		vec2 gx_sp = r_sp * dFdx(lp_sp) / bp_paper_m;
+		vec2 gy_sp = r_sp * dFdy(lp_sp) / bp_paper_m;
+		float fib_sp = textureGrad(bp_paper_tex, uv_sp, gx_sp, gy_sp).r - 0.5;
+		float tj_sp = 1.0 + (hash21(vec2(sd_sp, 5.3)) - 0.5) * 2.0 * bp_sheet_tone_var;
+		float wj_sp = (hash21(vec2(sd_sp, 8.1)) - 0.5) * 2.0 * bp_sheet_warm_var;
+		paper = paper * vec3(1.0 + wj_sp, 1.0, 1.0 - wj_sp) * tj_sp * edge_sp * (1.0 + fib_sp * 2.0 * bp_paper_on_paper);
+		ink_sp = ink_color + paper * max(fib_sp, 0.0) * 2.0 * bp_paper_on_ink;   // light fibres catching through the ink
+	}
+	// ---- OUTPUT ----------------------------------------------
+	// Assignment, not +=. See note on multiple lights below.
+	if (debug_view == 1) {
+		DIFFUSE_LIGHT = vec3(pattern);
+	} else if (debug_view == 2) {
+		DIFFUSE_LIGHT = vec3(lum);
+	} else if (debug_view == 3) {
+		DIFFUSE_LIGHT = vec3(tooth);
+	} else if (debug_view == 4) {
+		DIFFUSE_LIGHT = vec3(aq);
+	} else if (debug_view == 5) {
+		DIFFUSE_LIGHT = vec3(stipple_dots);
+	} else if (debug_view == 6) {
+		DIFFUSE_LIGHT = vec3(scumble_cut);
+	} else if (debug_view == 7) {
+		DIFFUSE_LIGHT = vec3(burnish_wear);
+	} else if (debug_view == 8) {
+		DIFFUSE_LIGHT = vec3(rough_sample);
+	} else if (debug_view == 10) {
+		DIFFUSE_LIGHT = use_bias_lobe ? vec3(lobe_w) : vec3(0.6, 0.0, 0.0);
+	} else if (debug_view == 11) {
+		DIFFUSE_LIGHT = use_lid ? vec3(lid_w) : vec3(0.6, 0.0, 0.0);
+	} else if (debug_view == 12) {
+		DIFFUSE_LIGHT = use_lid ? vec3(lid_light_add) : vec3(0.6, 0.0, 0.0);
+	} else if (debug_view == 13) {
+		DIFFUSE_LIGHT = use_lid ? vec3(lid_h) : vec3(0.6, 0.0, 0.0);
+	} else if (debug_view == 14) {
+		DIFFUSE_LIGHT = (use_cornea_cut || use_gleam_wedge) ? vec3(cornea_cut) : vec3(0.6, 0.0, 0.0);
+	} else if (debug_view == 15) {
+		DIFFUSE_LIGHT = use_cornea_cut ? vec3(cornea_h) : vec3(0.6, 0.0, 0.0);
+	} else if (debug_view == 17 || debug_view == 18) {
+		// 17 Labels: the collage as placed on each panel (worn patches dimmed); 18 Panel UVs: 1 m tiles, a
+		// different blue per panel -- tiles that run across a wall = the UVs arrived (red = Use Labels off)
+		DIFFUSE_LIGHT = label_dbg;
+	} else if (debug_view == 16) {
+		// white = cut to cream, black = brown printed (red = tone plate off)
+		DIFFUSE_LIGHT = use_tone_plate ? vec3(1.0 - tone) : vec3(0.6, 0.0, 0.0);
+	} else if (debug_view == 9) {
+		// >>> LIGHT_COMBINE_MAX (v19) -------------------------------
+		// TO REVERT: DIFFUSE_LIGHT = mix(paper_color, ink_color,
+		//                                step(lum, pattern));
+		DIFFUSE_LIGHT = max(DIFFUSE_LIGHT,
+		                    mix(paper_color, ink_color,
+		                        step(lum, pattern)));
+		// <<< end LIGHT_COMBINE_MAX ---------------------------------
+	} else {
+		// >>> LIGHT_COMBINE_MAX (v19) -------------------------------
+		// max(), not assignment. See the LIGHT_COMBINE_MAX note in
+		// the NOTES block for why, and for how to revert.
+		// TO REVERT: replace the two lines below with
+		//   DIFFUSE_LIGHT = mix(paper, ink_color, ink);
+		vec3 printed = output_grayscale
+		             ? vec3(1.0 - ink)
+		             : mix(paper, ink_sp, ink);
+		// a spot / omni pass that lights nothing here leaves the pixel alone (Positional Own Light)
+		if (v_surface) {
+			// VILLAIN SHADOW: this surface as it looks in shadow; past its edge (Tendrils) only the redraw's ink LINES carry on
+			DIFFUSE_LIGHT = mix(DIFFUSE_LIGHT, printed, max(v_mask, v_band * smoothstep(0.35, 0.65, ink)));
+		} else if (!own_light_skip) {
+			DIFFUSE_LIGHT = max(DIFFUSE_LIGHT, printed);
+		}
+		// <<< end LIGHT_COMBINE_MAX ---------------------------------
+	}
+	if (rf_t < 0.999) {                          // REVEAL FIRST's soft edge: the woodcut fades into the plates
+		DIFFUSE_LIGHT = mix(max(rf_dl_in, rf_plate), DIFFUSE_LIGHT, rf_t);
+	}
+	} else if (!pos_dark) {
+		DIFFUSE_LIGHT = max(DIFFUSE_LIGHT, rf_plate);   // REVEAL FIRST: unrevealed -- the plates only, no woodcut work
+	}	// end of POSITIONAL EARLY OUT's block (+ REVEAL FIRST)
+
+	// ---- VILLAIN SHADOW (lines where the villain's shadow falls; printed over what the earlier lights drew) ----
+	if (villain_pass && villain_style == 1 && use_villain_shadow && villain_light_pos.y > -50000.0 && villain_darkness > 0.0) {
+		vec3 wp_v = (INV_VIEW_MATRIX * vec4(v_view, 1.0)).xyz;
+		vec3 to_v = wp_v - villain_light_pos;
+		float cone_v = dot(normalize(to_v), villain_light_dir);
+		float in_cone_v = smoothstep(villain_cone_cos, mix(villain_cone_cos, 1.0, 0.1), cone_v);   // outside the cone is not "shadow"
+		float facing_v = smoothstep(0.0, 0.15, dot(normalize(NORMAL), LIGHT));                        // faces turned away get none
+		// lines laid on the surface itself in metres (ground: across the street plan; walls: along the wall), so a low
+		// sun doesn't stretch them into dashes along the shadow
+		vec3 wn_v = normalize(mat3(INV_VIEW_MATRIX) * NORMAL);
+		vec2 q_v = wp_v.xz;
+		if (abs(wn_v.y) < 0.7) {
+			vec3 tw_v = normalize(cross(vec3(0.0, 1.0, 0.0), wn_v));
+			q_v = vec2(dot(wp_v, tw_v), wp_v.y);
+		}
+		float a_v = radians(villain_line_angle);
+		q_v = vec2(q_v.x * cos(a_v) - q_v.y * sin(a_v), q_v.x * sin(a_v) + q_v.y * cos(a_v));
+		float tick_v = floor(TIME * villain_flicker_rate);
+		float jump_v = (hash21(vec2(tick_v, 3.17)) - 0.5) * villain_flicker;
+		float bend_v = (blender_noise_fbm(vec3(q_v * 0.8, tick_v * 0.13), 2.0, 0.0) - 0.5) * villain_wobble;
+		float ph_v = fract(q_v.y * villain_line_density + bend_v + jump_v);
+		float aa_v = fwidth(q_v.y * villain_line_density) + 0.001;
+		float line_v = 1.0 - smoothstep(villain_line_width - aa_v, villain_line_width + aa_v, abs(ph_v - 0.5) * 2.0);
+		// the shadow itself, its edge chewed by noise
+		float rag_v = (blender_noise_fbm(vec3(wp_v.xz * 3.0, tick_v * 0.21), 3.0, 0.0) - 0.5) * villain_edge_ragged;
+		float shad_v = 1.0 - smoothstep(0.25, 0.55, ATTENUATION + rag_v);
+		float ink_v = clamp(in_cone_v * facing_v * shad_v * line_v * villain_darkness, 0.0, 1.0);
+		DIFFUSE_LIGHT = mix(DIFFUSE_LIGHT, ink_color, ink_v);
+	}
+}
+
+// =============================================================
+//  NOTES
+// =============================================================
+//
+//  SETUP
+//    - Material Override -> New ShaderMaterial -> New Shader -> paste.
+//    - Add a DirectionalLight3D at the SCENE ROOT, not as a child of
+//      the mesh. It has no position, only rotation (Inspector ->
+//      Node3D -> Transform -> Rotation). Try X -45, Y -30.
+//    - Enable its Shadow -> Enabled. Off by default, no warning.
+//    - Set ANGULAR DISTANCE to 0 (DirectionalLight3D) or SIZE to 0
+//      (Omni / Spot). Softness there makes penumbra, which reads as
+//      grey through a hard threshold.
+//    - Turn OFF the viewport preview sun and preview environment
+//      (two buttons, top-right of the 3D viewport). The preview sun
+//      is a real light as far as light() is concerned.
+//
+//  THE POV DIALS
+//    All five share one direction: LOW = camera or window anchored,
+//    HIGH = locked to the object. The name says which camera-anchored
+//    space sits at the low end (cam or win).
+//
+//      pattern_pov_cam_to_obj   cam -> obj
+//      wobble_pov_cam_to_obj    cam -> obj
+//      tooth_pov_cam_to_obj     cam -> obj
+//      rough_pov_win_to_obj     win -> obj
+//      aqua_pov_win_to_obj      win -> obj
+//      scumble_pov_cam_to_obj   cam -> obj
+//      stipple_pov_cam_to_obj   cam -> obj
+//
+//    Around 0.25 on the pattern dial gives form-describing curvature
+//    while keeping printed density. Good for cloth and drapery.
+//    Aquatint is the tone of the SHEET, so LOW is the honest choice
+//    there - unlike tooth, which describes the object.
+//
+//  OBJ_AXIS
+//    obj_c is built from two of the three object-space axes.
+//    PlaneMesh lies in XZ, so its local Y is zero everywhere - with
+//    obj_axis XY you sample one horizontal line of noise and smear it,
+//    which produces hard stripes. Set obj_axis to XZ for planes and
+//    floors. Duplicate the material (Make Unique) so the sphere can
+//    keep 0.
+//
+//  SCUMBLE WOBBLE IS RELATIVE TOO
+//    Same trap as wobble_amount: the displacement is multiplied by
+//    scumble_scale inside hatch(), so at scale 2000 a raw value of
+//    0.02 shattered the cuts completely. Now divided by
+//    scumble_scale internally, so the dial reads as a fraction of
+//    cut spacing. 0.1 is a slight waver, 1.0 has cuts crossing.
+//
+//  WOBBLE AMOUNT IS RELATIVE
+//    wob displaces the coordinate BEFORE the sine, so its effect is
+//    multiplied by wave_scale. At wave_scale 1000 an absolute
+//    displacement of 0.002 already shifts the line by a third of its
+//    own spacing, which is why the dial used to need such tiny
+//    numbers. It is now divided by wave_scale internally, so the
+//    value reads as a fraction of line spacing and survives any
+//    change of density.
+//
+//  SLIDER RANGES AND STEPS
+//    hint_range takes a THIRD argument for step size:
+//      hint_range(min, max, step)
+//    Without it Godot picks a coarse default and a slider spanning
+//    a wide range gives you one useful value every few pixels.
+//
+//    Two separate problems, and both need fixing together:
+//      RANGE TOO WIDE - the useful territory occupies a sliver of
+//        the track. Narrow the range to where you actually work.
+//      NO STEP - dragging jumps in visible increments. Add one.
+//
+//    Click the number rather than dragging to type an exact value,
+//    and Ctrl+drag (not Shift) for fine adjustment in Godot.
+//
+//    If a dial still feels coarse, narrow its range further - these
+//    are guesses and yours will differ by subject scale.
+//
+//  TAPER BY CURVE
+//    use_taper_profile swaps the power function for a CurveTexture,
+//    sampled left to right from root to tip. The curve's value is
+//    the width at that height - 1.0 full, 0.0 a point.
+//
+//    Assign it in the Shader Parameters (it is a sampler, so it
+//    cannot be an instance uniform and is therefore per MATERIAL,
+//    not per node - hair zones wanting different profiles need
+//    separate materials).
+//
+//    What a curve buys that a power function cannot: a swell
+//    partway up, a quick narrowing followed by a long thin run,
+//    a slight flare right at the tip. Real hair clumps are not
+//    monotonic, and a power function can only ever be.
+//
+//    The cone-normal correction still uses tip_width and
+//    taper_curve to estimate its slope, so with a profile assigned
+//    it is approximate. Set tip_width near the curve's end value if
+//    you are using both.
+//
+//  TUBES INSTEAD OF FLAT CARDS
+//    Everything here works on either. The bend integrates a frame
+//    and rebuilds the cross-section as B * local.x + N * local.z,
+//    which is already general - it never assumed z was zero. Width
+//    and taper scale X and Z together, so a card (z = 0) is
+//    unaffected by the z half and a tube stays round.
+//
+//    WHAT TUBES FIX
+//      They cannot vanish edge-on, so the billboarding question
+//      disappears entirely, and with it the shadow-pass problem.
+//      Radial normals give real volume, so a styled mass reads as
+//      mass rather than as overlapping flats.
+//      root_normal_blend can come DOWN - the tube already supplies
+//      form, so less scalp normal is needed and individual strands
+//      stay more legible. Try 0.3 - 0.5 rather than 0.7.
+//
+//    WHAT THEY COST
+//      Vertex count. A six-sided eight-segment tube is roughly 100
+//      vertices against a card's eight, and the bend loop runs 16
+//      iterations per vertex. Keep tubes to four to six sides -
+//      under a two-value threshold the silhouette carries the read,
+//      not the smoothness of the shading.
+//
+//    THE PATTERN ON A TUBE
+//      Object-space lines run along the tube's length and crowd
+//      toward its silhouette edges, because the coordinate changes
+//      fastest where the surface turns away. That is how an
+//      engraver draws a cylinder, so it works in your favour -
+//      but check obj_axis. XY on a vertical tube is usually right.
+//
+//  WHY WIDTH IS A SHADER PARAMETER
+//    Instance scale is applied AFTER vertex() runs. A non-uniform
+//    scale - Vector3(1, length, 1) to lengthen a strand - therefore
+//    stretches the finished arc along world axes. At 0 degrees the
+//    strand lies along Y and nothing shows; as it bends, more of the
+//    arc lies off-axis and the distortion grows fast. That is the
+//    stretching that appeared past about 9 degrees.
+//
+//    So: scale the instance UNIFORMLY for length, and set width with
+//    strand_width here. The bend then holds at any angle, and
+//    per-strand length jitter still works.
+//
+//  PER-STRAND WAVE PHASE
+//    wave_phase as an instance uniform is per NODE, so every strand
+//    in a zone waves identically. The bake writes a random phase per
+//    strand into COLOR.a - free, since the scalp normal only needs
+//    rgb - and the shader adds the uniform on top as a zone-wide
+//    offset. With no colours baked, COLOR.a is 1.0, which is one
+//    full period and therefore equivalent to 0.
+//
+//  INSTANCE UNIFORMS - PER-NODE HAIR CONTROLS
+//    These eleven are declared "instance uniform" rather than
+//    "uniform":
+//      strip_height  tip_width  taper_curve
+//      bend_angle  bend_direction  bend_falloff
+//      wave_amount  wave_count  wave_phase
+//      curl_twist  root_normal_blend
+//
+//    That means eight hair nodes - four zones times two blades -
+//    share ONE material file while each keeps its own values. Edit
+//    the shader once and it propagates; the sliders stay separate.
+//
+//    WHERE THEY APPEAR: not in Shader Parameters. Select the
+//    MultiMeshInstance3D and look under GeometryInstance3D ->
+//    Geometry -> Instance Shader Parameters.
+//
+//    IF THE SLIDERS DO NOTHING: a set_instance_shader_parameter()
+//    call naming a plain uniform is silently ignored. The name in
+//    the bake script must match the name here EXACTLY:
+//      bend_angle      degrees of turn at the tip
+//      bend_falloff    distribution along the length
+//      tip_width       fraction of root width at the tip
+//      taper_curve     shape of the taper
+//    A bake script written against bend_amount / bend_curve will
+//    fail silently against this shader.
+//
+//    Limits: about 16 per shader, no samplers, no bools. Eleven
+//    leaves room for a few more.
+//
+//  WHY THE BEND INTEGRATES
+//    The obvious bend - rotate each vertex about the root by an
+//    angle proportional to its height - is not a bend. A point at
+//    height y moves along a circle of radius y, so the centreline
+//    becomes (y sin t, y cos t) and its length grows by
+//    sqrt(1 + y^2 * dtheta^2). Below about eight degrees the error
+//    is invisible; above it the hair visibly stretches.
+//
+//    v28 walks a frame up the strand instead: turn by the LOCAL
+//    rate, advance by a fixed arc length, repeat. Length is correct
+//    by construction no matter what bend, wave and curl are doing,
+//    and the frame carries the normal with it so shading follows.
+//
+//    Sixteen steps. If very tight curls show faceting, raise
+//    BEND_STEPS in the loop; it is a compile-time constant.
+//
+//  WAVES AND CURLS
+//    Three terms, and they do different jobs:
+//      bend_angle   accumulates - the strand arcs one way
+//      wave_amount  oscillates  - the strand snakes back and forth
+//      curl_twist   rotates the PLANE the bending happens in, so
+//                   the tip corkscrews rather than staying flat
+//
+//    Straight hair    bend only, small angle, falloff 2-3
+//    Wavy hair        wave_amount 15-30, wave_count 2-3, curl 0
+//    Loose curls      wave_amount 20-40, curl_twist 180-360
+//    Tight ringlets   bend_angle high, curl_twist 540-720,
+//                     falloff near 1 so it curls from the root
+//
+//    NORMALS FOLLOW AUTOMATICALLY. All of this happens inside the
+//    same Rodrigues rotation, which is applied to NORMAL as well as
+//    position - so a wave lights like a wave and a curl catches
+//    light on its outer face. That is most of what sells it.
+//
+//    VARY THE PHASE PER STRAND. wave_phase as a uniform makes every
+//    strand wave identically and the head reads as corrugated metal.
+//    Pack a random phase into a spare MultiMesh custom-data or
+//    COLOR channel at bake time and read it here instead.
+//
+//    The rotation is single-axis per vertex rather than a properly
+//    integrated frame, so very large angles distort rather than
+//    curling cleanly. Under a two-value shader that shows up later
+//    than it would in a shaded render, but keep the combined turn
+//    under roughly 720 degrees.
+//
+//  BILLBOARDING HAIR - WHY NOT, IN THIS SHADER
+//    Rotating a strip about its own Y to face the camera stops it
+//    vanishing edge-on. It costs two things here that it would not
+//    cost in an ordinary renderer:
+//
+//    1. SHADOWS. The shadow pass runs vertex() from the LIGHT'S
+//       position, so billboarded cards turn to face the light and
+//       cast shadows shaped like nothing on screen. The fix is to
+//       disable shadow casting on the hair - which for a
+//       match-lit character means losing hair shadow on the face,
+//       one of the strongest cues in the whole image.
+//
+//    2. MARK TWIST. v_obj is captured before deformation, so marks
+//       are welded to the card. Rotate the card to follow the
+//       camera and its marks rotate with it - the hatching appears
+//       to spin as you orbit. Nothing is wrong; the marks are
+//       correctly stuck to geometry that is itself turning.
+//
+//    CROSS-BLADE GEOMETRY has neither problem. Two strips in an X
+//    per clump, one always presenting, no shader involvement, no
+//    view dependence, real shadows. Do that first. Billboarding is
+//    the fallback if it proves insufficient, and a damped billboard
+//    (0.3 - 0.6 toward camera) keeps some structure while limiting
+//    both costs.
+//
+//  DEFORMING STRIPS AND WHERE v_obj IS CAPTURED
+//    v_obj is read from VERTEX at the TOP of vertex(), before the
+//    taper and before the bend. That is deliberate and it is the
+//    thing that makes animated hair work at all.
+//
+//    Capture it after the deformation and the pattern coordinate
+//    moves every time the strand does, so the hatching crawls along
+//    the hair as it blows. Capture it before, and the marks are
+//    welded to the strand: the strand bends and its marks bend with
+//    it, exactly as ink on a bending object would.
+//
+//    Same reasoning as the skinned-mesh caution - Godot applies
+//    skeletal deformation before vertex() runs, so a rigged mesh
+//    cannot use this trick and wants UV-based coordinates instead.
+//    Vertex-shader deformation CAN, because we control the order.
+//
+//  IDENTICAL SETTINGS, DIFFERENT LINE SPACING
+//    This shader uses NO UVs for the pattern. The arms read object
+//    space (v_obj), view space (v_view) or SCREEN_UV. Unwrapping
+//    cannot be the cause of a spacing mismatch.
+//
+//    The usual cause is NODE SCALE. Object space is model space,
+//    measured before the transform, so a mesh instanced at 3x
+//    carries a pattern stretched to 3x. Hair strands, planks,
+//    anything built by scaling one source mesh to different lengths
+//    will show exactly this: same wave_scale, different spacing.
+//
+//    Three fixes, in order of preference:
+//      1. Apply scale in the DCC so every node sits at scale 1 and
+//         length comes from geometry. Cleanest, fixes it at source.
+//      2. Tick obj_compensate_node_scale. Divides the problem out
+//         in the shader, per material.
+//      3. Move the arm toward camera space, which is measured after
+//         the transform and is immune - at the cost of the pattern
+//         no longer sticking to the object.
+//
+//  SCALE IN OBJECT SPACE
+//    A 2m character spans about -1 to 1 in object space, so a scale
+//    value reads directly as "cycles across the object":
+//      single digits   broad drift down the whole figure
+//      tens            surface detail, waver, tool irregularity
+//      hundreds        grit
+//    View space is metres from the camera instead - often 5 to 20 -
+//    so any value tuned there needs raising when an arm is moved to
+//    object space.
+//
+//  SCALE
+//    Every scale value is calibrated for a unit mesh spanning about
+//    -1..1. Imported models at real-world scale will look far denser.
+//    Set object_scale_comp FIRST, then the individual scales.
+//    Moving a noise arm from window to object space also changes its
+//    units - tooth_scale 60 in window space is roughly 2-8 in object
+//    space.
+//
+//  NOISE TEXTURES
+//    NoiseTexture2D -> Noise -> FastNoiseLite. Enable Seamless.
+//
+//    On-screen cell count = cells inside the texture x its scale.
+//    Getting large features by tiling a texture with no structure in
+//    it produces regular repeats. Build the structure instead:
+//      Resolution 2048 (not 512)
+//      Frequency ~0.003  -> about six large cells across the texture
+//      tooth_scale ~1.0  -> barely tiling, repetition invisible
+//
+//    tooth / aquatint : Cellular. Return Type Distance2Sub gives
+//      cell-boundary veins, closest to Blender's Distance-to-Edge.
+//      Manhattan distance facets the cells, which helps.
+//    roughness / wobble : Simplex or Perlin.
+//
+//    DOMAIN WARP is the main lever against regularity - it distorts
+//    the field so cell edges become irregular wedges rather than
+//    clean arcs. Type Simplex, Amplitude 30-50, Frequency 0.005.
+//
+//    Keep Fractal Type NONE. Ping Pong folds values and manufactures
+//    banding. More octaves adds fine detail, it does not make cells
+//    more irregular.
+//
+//  FEEDING A POST SHADER
+//    output_grayscale makes this shader write 0.0 and 1.0 instead
+//    of ink_color and paper_color, so a canvas_item shader on the
+//    SubViewportContainer owns the palette for the whole frame.
+//    Worth doing when woodcut characters and Lucifers share one
+//    container - one paper, one grade, no drift between them.
+//
+//    WHAT A POST SHADER CAN AND CANNOT DO TO THIS OUTPUT
+//    The output is BINARY. Post stages written for continuous tone
+//    behave very differently on it:
+//
+//      final grade (black/white point, contrast)  works fine
+//      colourising to ink and paper              works fine
+//      gray compress toward 0.5                  moves both values
+//                                                but changes nothing
+//                                                a later threshold
+//                                                will not undo
+//      rosin / aquatint before a threshold       DOES NOTHING. The
+//                                                values sit at 0 and
+//                                                1, far outside the
+//                                                range a small noise
+//                                                offset could push
+//                                                across a threshold
+//      highlight burn-out                        nothing to burn
+//      render_blend of the modelled layer        the modelled layer
+//                                                is also binary
+//
+//    So do NOT expect the post rosin to grain these characters.
+//    Use this shader's own AQUATINT arm for that - it works before
+//    the threshold, where noise still has something to act on.
+//    That is the general rule: anything that needs continuous tone
+//    has to happen inside light(), before step().
+//
+//  LIGHT_COMBINE_MAX  (introduced v19, REVERSIBLE)
+//    Search the file for LIGHT_COMBINE_MAX to find both sites. Each
+//    is marked with >>> and <<< and carries its own revert line.
+//    Reverting touches nothing else - no uniforms, no other arms.
+//
+//    WHY IT IS THERE: small spot lights were painting jagged wedges
+//    of solid black onto distant geometry.
+//
+//    KNOWN LIMITATION: two lights on one surface do not sum. The
+//    brighter result simply wins.
+//
+//    SYMPTOMS THAT WOULD MEAN REVERTING: shadows reading lighter
+//    than they should because a second light keeps winning; a fill
+//    light refusing to stay subordinate to a key; any case where a
+//    surface will not go as dark as the settings say it should.
+//    If those appear, try Cull Mask on the light plus Layers on the
+//    mesh FIRST - that solves most of them without giving the wedge
+//    problem back.
+//
+//  MULTIPLE LIGHTS
+//    light() runs once PER LIGHT, and the final colour is combined
+//    with max() - brightest wins.
+//
+//    Not assignment: a light that contributes nothing still runs
+//    light(), computes lum near zero, and produces solid ink. With
+//    assignment the last light processed won, so ANY light that
+//    Godot decided might touch a fragment could overwrite the key
+//    light with darkness. That is what caused jagged wedges of
+//    black on distant geometry - Godot's clustered renderer divides
+//    the frustum into wedge-shaped cells that grow with depth, and
+//    a small spot near the camera claims a cell reaching far into
+//    the distance.
+//
+//    Not accumulation either: += would stack paper_color once per
+//    light and blow out to white.
+//
+//    max() cannot exceed paper_color, so it is safe, and a
+//    contributing light always beats a non-contributing one. The
+//    limitation is that two lights on the same surface do not sum -
+//    the brighter one simply wins. For a threshold system that is a
+//    fair approximation, and it makes several lights usable.
+//
+//    Cull Mask on the light plus Layers on the mesh
+//    (VisualInstance3D) still give a hard guarantee where one is
+//    wanted - useful for keeping a character's rim light off the
+//    backdrop.
+//
+//  PATTERN TYPES
+//    Lines        straight ruled hatching
+//    Sinusoid     sine_amp is swing width, sine_freq is swings per
+//                 unit length. Small amp reads as hand waver, large
+//                 amp reads as flowing water or hair.
+//    Parabolic    a single bow, no repeat along the line. Gentler
+//                 than a sinusoid. Negative parabola_curve bows the
+//                 other way. Good for drapery and rounded volumes.
+//    Rings        concentric from pattern_center. wave_scale is ring
+//                 spacing.
+//    Spokes       radial from pattern_center. spoke_count is spokes
+//                 per full circle - keep it near a whole number or
+//                 there is a visible seam at the wrap. spoke_twist
+//                 spirals them.
+//
+//    pattern_center is in the ACTIVE coordinate space, so it moves
+//    with pattern_pov_cam_to_obj. At 1.0 (object space) the centre
+//    sits at the object origin, which is usually what you want for
+//    rings and spokes.
+//
+//  SPOKE CURVE
+//    Assign a CurveTexture to spoke_curve to shape the spokes as
+//    they travel outward. Sampled left to right from the centre out
+//    to spoke_curve_len. Flat 1.0 = no change. Drop the right end
+//    to fade spokes out with distance; dip the middle for a waisted
+//    look. This is the direct equivalent of the RGB curve node.
+//
+//  GLARE
+//    A radiating layer that ADDS luminance rather than ink.
+//    Because it lands before the threshold, ink thins where the
+//    glare falls, so it reads as light rather than as more marks.
+//    Around 0.2 gives the roughly 20 percent lift that keeps spokes
+//    and glare legible against whatever pattern they sit on.
+//
+//    Spokes  even-width rays, faded out by glare_len
+//    Glare   wide at the centre, tapering to a point. glare_sharp
+//            controls how fast it comes to a point.
+//
+//    Glare has its own centre and count, so it can sit on top of
+//    a completely different main pattern - glare over parabolic
+//    drapery, for instance.
+//
+//  STIPPLE
+//    SEPARATE DOTS. Cellular noise packs cells edge to edge, so
+//    thresholding it straight gives a crowded field of blobs. For
+//    isolated dots:
+//      Return Type   Distance   (0 at cell centres, high at walls)
+//      stipple_invert  ON       (so centres become the bright peaks)
+//      coverage        LOW      (only the very centres survive)
+//    Cell SPACING is FastNoiseLite Frequency - lower means larger
+//    cells and further-apart dots. Frequency 0 is degenerate: the
+//    whole texture becomes one flat value with no cells in it.
+//    Start around 0.02.
+//
+//    stipple_coverage IS the threshold. stipple_lum_response is not
+//    a threshold - it decides how much luminance modulates coverage,
+//    and 0 means the same coverage in light and shade.
+//
+//    DOMAIN WARP distorts the coordinate field before the noise is
+//    evaluated, so cells stop sitting on a regular lattice. Type
+//    Simplex, Amplitude 30-50, Frequency 0.005. Without it, dots
+//    land on a visible grid at low coverage.
+//
+//    stipple_flip reverses polarity below stipple_pivot: dark specks
+//    in light, light specks in shade. Without it stipple disappears
+//    in deep shadow, because black dots on solid ink are invisible -
+//    exactly where a wall most needs to keep reading as stone.
+//    Physically right as well: raised grains catch light, pits hold
+//    shadow, so a rough surface genuinely reverses contrast between
+//    its lit and shaded faces. stipple_flip_blend dithers the
+//    changeover with the clump field so it does not land as a clean
+//    contour line across the wall.
+//
+//    The only arm that ADDS ink. Everything else either sets the
+//    threshold or cuts ink away, which means a fully lit surface
+//    goes blank - fine for skin, wrong for stone. Stipple survives
+//    into the highlights so masonry still reads as masonry.
+//
+//    stipple_clump multiplies the dot field by a much lower
+//    frequency copy of itself. Without it the dots scatter evenly
+//    and read as digital noise; with it they gather into patches
+//    the way weathering actually falls on a wall.
+//
+//    Sits LAST in the chain - after scumble, burnish and paper
+//    tooth - so nothing erodes the dots. They read as raised grains
+//    catching light rather than as printed marks, which is why they
+//    hold full ink density even in a washed-out highlight.
+//
+//    SIZE AND SPACING. Frequency and coverage are COUPLED - halve
+//    the frequency and cells double in size, so the same coverage
+//    gives marks twice as big. That is why spreading dots out also
+//    fattens them.
+//
+//    stipple_falloff breaks the coupling. It sharpens the sampled
+//    field toward its peaks before the threshold, shrinking marks
+//    while cell spacing stays exactly where it was.
+//
+//    So the recipe for "same size, further apart" is:
+//      1. Lower FastNoiseLite Frequency until the spacing is right.
+//         Marks will be too fat.
+//      2. Raise stipple_falloff until they shrink back.
+//    Coverage stays where it was through both steps.
+//
+//    BREAKING THE GRID. Two separate grids cause regularity:
+//      1. The CELLULAR LATTICE. FastNoiseLite places feature points
+//         on a jittered grid. Set Jitter to 1.0 for maximum scatter
+//         (values above 1.0 artefact). Then turn on DOMAIN WARP -
+//         Type Simplex, Amplitude 30-50, Frequency 0.005.
+//      2. The TILE REPEAT. The texture repeats every 1/stipple_scale
+//         units, so the same arrangement of dots recurs. Domain Warp
+//         inside the texture cannot fix this - it is baked in.
+//         stipple_warp displaces the sampling coordinate itself,
+//         which does. Also raise texture resolution to 1024 or 2048
+//         and keep Seamless on.
+//
+//    ROTATION. stipple_warp_rotate turns each block about its own
+//    centre by a random angle before sampling, so marks are not all
+//    oriented the same way. It uses the same blocks as the offset,
+//    so marks still move rigidly. Rotating about the block CENTRE
+//    rather than the origin matters - otherwise the block swings
+//    sideways as it turns and the two effects fight each other.
+//    180 is full random orientation. Since it re-cuts the block
+//    edges, keep stipple_warp_cells low when using it.
+//
+//    WHY THE WARP IS QUANTISED. A smooth warp field varies across
+//    each mark, so one side of a dot moves further than the other
+//    and it shears into a banana. Quantising the offset into blocks
+//    makes every pixel in a block move by the same amount, so marks
+//    keep their shape. The cost is that a mark straddling a block
+//    edge gets chopped - keep stipple_warp_cells low so blocks are
+//    much larger than the marks and that stays rare.
+//
+//    Cellular RETURN TYPE also changes the size-to-spacing ratio.
+//    Distance2Div and Distance2Mul fall off faster than plain
+//    Distance, giving tighter marks for the same cell size - worth
+//    cycling before reaching for falloff.
+//
+//    The dots are always full ink. step() only returns 0 or 1, and
+//    ink is set with max(), so a dot is exactly ink_color. If they
+//    look faint, they are sub-pixel and averaging - make them
+//    bigger, do not look for an intensity control.
+//
+//    For a city scene, expect one material per surface type -
+//    brick, cut stone, plaster, roof slate - differing mainly in
+//    stipple_scale, coverage and clump. Structural lines (mortar
+//    courses, window reveals) come from the geometry.
+//
+//  ALPHA CUTOUT AND CULLING
+//    Alpha scissor discards, it does not blend, so a leaf card
+//    behaves like solid geometry: correct sorting, real depth, and
+//    a cut-out shadow that dapples the ground.
+//
+//    TWO-SIDED CARDS need cull_disabled, and cull mode is a
+//    render_mode - it is global to the shader file, not per
+//    material. Two ways to handle it:
+//      1. Change the render_mode line at the top of this file to
+//         include cull_disabled. Simplest, but every closed mesh
+//         in the scene then shades its back faces too, which is
+//         not free with a shader this size.
+//      2. Keep one copy of this shader with cull_disabled for
+//         cards and foliage, and the default for everything else.
+//         Two files, no wasted fill. Preferred once the scene has
+//         more than a handful of characters in it.
+//
+//    If leaf edges shimmer at distance, that is the scissor
+//    aliasing. Raise alpha_threshold slightly, or enable mipmaps on
+//    alpha texture.
+//
+//  SKY DOMES
+//    A camera-parented dome never recedes, so its marks never
+//    compress with distance - angular size is constant and so is
+//    on-screen line density. Distance is not the problem.
+//
+//    COORDINATE SPACE is. Object space on a sphere pinches at the
+//    poles, crowding marks into grey mush at the zenith. View space
+//    planar-projects and crowds at the horizon instead. Set
+//    pattern_pov_win to 1.0 and neither happens.
+//
+//    Use a SEPARATE material for the dome, with cull_front, Cast
+//    Shadow off, and its own compressed map range. Do not share the
+//    foreground material - almost every setting wants different
+//    values at dome scale.
+//
+//  TWO INDEPENDENT MARK SYSTEMS
+//    For a sky the two arms are not "hatching plus cross-hatching
+//    in the shadows" - they are two separate drawings sharing a
+//    plate. Rain and cloud have different densities, different
+//    falloffs and different angles.
+//
+//    Set cross_threshold to 1.0 so the gate never closes, then use
+//    the cross levels and cross gradient to shape that arm on its
+//    own. A typical sky: main arm Rings for cloud with a gentle
+//    vertical ramp, cross arm Lines near-vertical for rain with a
+//    stronger ramp so it thins toward the top of frame.
+//
+//  ATMOSPHERIC PERSPECTIVE, MOSER STYLE
+//    A distant plane is not greyer - there is only one ink. It is
+//    LESS INK: thinner marks, more paper between them, and a tonal
+//    range that never reaches either extreme.
+//
+//    The map range is the lever. Compressing out_min and out_max
+//    into a narrow band near the light end means hatching never
+//    goes solid and never goes bare, which reads as lower contrast
+//    while every mark stays pure black. Try out_min 0.45,
+//    out_max 0.8 on a sky, against 0.0 to 1.0 on a foreground
+//    figure.
+//
+//    Lightening ink_color toward paper_color is the other lever,
+//    and it is the honest equivalent of a second, lighter plate.
+//    Use it sparingly - it is the one place this system admits a
+//    value that is neither ink nor paper.
+//
+//    TWO MARK SYSTEMS AT DIFFERENT ANGLES: set cross_threshold to
+//    1.0 so the cross arm runs everywhere rather than only in
+//    shadow, then give the two arms different types and angles.
+//    Lines near-vertical for distant rain, Rings or Sinusoid for
+//    cloud mass. One material, one plate, two systems.
+//
+//  NIGHT SCENES
+//    Use ink_flood, not a colour swap. The world is the night
+//    version of an 1880s label, and a label is printed on paper -
+//    so the sheet stays light and the darkness is made of ink.
+//    That is Bewick's white-line logic: the lights are what get
+//    cut out of a dark field, rather than the darks being added
+//    to a light one.
+//
+//    The arms that do the cutting are already here. HIGHLIGHT /
+//    SCUMBLE breaks the dense field open where light falls, and
+//    HIGHLIGHT / BURNISH wears it away entirely at the peak. In a
+//    flooded scene those stop being finishing touches and become
+//    the main drawing tools - expect to push both much harder than
+//    in a daylight scene.
+//
+//    GLARE matters more at night too, since it raises luminance
+//    before the threshold and is therefore the only arm that can
+//    punch bare paper out of a fully flooded field.
+//
+//    Suggested starting point for night:
+//      ink_flood        0.6
+//      scumble_amount   0.5 and up
+//      burnish_gain     4 and up
+//      cross_threshold  low, or use_cross off - there is little
+//                       point cross-hatching an already solid field
+//
+//  TUNING ORDER
+//    1. debug_view 1 - wave_scale, line_angle.
+//    2. debug_view 2 - internal_intensity, map range across 0..1.
+//    3. debug_view 0 - check the threshold reads.
+//    4. Noise arms one at a time, amounts up from 0.
+//    debug_view 3 and 4 should be pure black and white. Any grey
+//    means something continuous is leaking past the threshold.
+//
+//  GETTING WEDGES OUT OF PAPER TOOTH
+//    The goal is angular white intrusions driven in from the sides
+//    of a stroke, breaking it at high amounts - not round nibbles.
+//    Four things together:
+//
+//    1. tooth_depth_in sets BITE DEPTH. Small values keep the
+//       erosion at the very edge of a stroke; large values let it
+//       reach the centre and break the line. This is the dial for
+//       "at high levels it interrupts the ink".
+//    2. tooth_aspect elongates the bites. Set tooth_angle equal to
+//       line_angle first, then raise aspect - the wedges now run
+//       along the stroke instead of across it.
+//    3. The texture supplies the ANGULARITY. Cellular, distance
+//       function MANHATTAN, jitter 1.0, Return Type Distance2Sub.
+//       Manhattan is what facets the cells into knife shapes;
+//       Euclidean gives rounded blobs.
+//    4. Domain Warp on, Simplex, Amplitude 30-50. Without it the
+//       wedges all point the same way.
+//
+//    tooth_amount then controls how hard they bite, and the sizes
+//    vary on their own because the cells do.
+//
+//  IF ROUGHNESS SEEMS TO DO NOTHING
+//    1. debug_view Roughness shows the raw sample. Flat white means
+//       the texture slot is EMPTY - hint_default_white returns 1.0
+//       everywhere, so the arm becomes a uniform darkening with no
+//       variation in it at all.
+//    2. Add-only roughness can only act where ink is NOT already
+//       solid. It lowers the waterline, and in an area that is
+//       already fully inked there is nothing left to lower. Expect
+//       to see it only at stroke edges in the mid and light tones -
+//       and expect it to vanish entirely at high ink_flood.
+//    3. It is applied AFTER the map range clamp, so it is the one
+//       arm that can push lum outside 0..1. That is deliberate, but
+//       it means a scene already crushed to 0 will not show it.
+//
+//  WHICH ARM ADDS AND WHICH REMOVES
+//    Keeping these straight is what stops the arms fighting:
+//      SEA ROUGHNESS  adds ink only. Ink bleeding into fibre at a
+//                     stroke edge. Ragged edges, never holes.
+//      PAPER TOOTH    removes ink only. Fibre the ink failed to
+//                     reach. This is the arm that makes light
+//                     flecks inside dark areas.
+//      SCUMBLE        removes ink, in the highlights, as lines.
+//      BURNISH        removes ink, at the peak, as grit.
+//      STIPPLE        adds ink, as raised grain. Last in the chain,
+//                     so nothing erodes it.
+//      GLARE          adds luminance, so removes ink, radially.
+//
+//    A bidirectional arm is almost always a mistake - it does one
+//    job in the lights and the opposite job in the darks, and the
+//    two readings do not belong to the same physical cause.
+//
+//  GENERAL RULE
+//    Anything the engine adds OUTSIDE light() bypasses the waterline
+//    entirely - ambient, specular, SSAO, fog, volumetrics. When grey
+//    appears where it should not, ask what is writing colour that is
+//    not your threshold.
