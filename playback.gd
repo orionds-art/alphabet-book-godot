@@ -2,6 +2,8 @@
 # together from one clock (Blender frame numbers, 30 fps), and moves her follow camera + salon spots with her.
 # First written by astrid_godot_export.py; from then on it is Orion's (the exporter only rewrites it with `-- main`).
 # Keys (run window): Space play / pause, Left / Right one frame (Shift: 10), Home first frame, C switch camera.
+# F = fly camera (fly_cam.gd, as in Parrots France): starts where the current camera is; hold RIGHT mouse to look,
+# W A S D move, Q / E down / up, Shift 4x faster, Ctrl 4x slower, wheel = speed, R = back to the start. F again leaves it.
 @tool
 extends Node3D
 
@@ -17,10 +19,12 @@ const LAST := 1050.0
 	set(v):
 		frame = clampf(v, FIRST, LAST)
 		_apply()
-@export_enum("Book", "Astrid") var view := 0:
+@export_enum("Book", "Astrid", "Fly") var view := 0:
 	set(v):
 		view = v
 		_apply_camera()
+## fly camera start speed, metres per second (the book is about 11.7 m across)
+@export var fly_speed := 1.5
 ## play in the editor viewport too (off: the editor only follows `frame`)
 @export var play_in_editor := false
 @export var show_frame := true
@@ -29,6 +33,7 @@ var _ap: AnimationPlayer
 var _clip := ""
 var _root_motion: Node3D
 var _book: Node
+var _fly: Camera3D
 
 func _ready() -> void:
 	var astrid := get_node_or_null("Astrid (import)")
@@ -73,9 +78,36 @@ func _apply() -> void:
 func _apply_camera() -> void:
 	if not is_inside_tree():
 		return
+	if view == 2:
+		if Engine.is_editor_hint():
+			return
+		_start_fly()
+		return
 	var c := get_node_or_null("Book Camera" if view == 0 else "Astrid Follow/Astrid Camera") as Camera3D
 	if c:
 		c.current = true
+
+# a fresh fly camera at the camera you were looking through (run window only, never saved into the scene)
+func _start_fly() -> void:
+	var from := get_viewport().get_camera_3d()
+	if _fly:
+		_fly.queue_free()
+	_fly = Camera3D.new()
+	_fly.name = "Fly Camera"
+	if from:
+		_fly.fov = from.fov
+		_fly.near = from.near
+		_fly.far = from.far
+		_fly.cull_mask = from.cull_mask
+		_fly.environment = from.environment
+		_fly.attributes = from.attributes
+		_fly.compositor = from.compositor
+	_fly.set_script(load("res://fly_cam.gd"))
+	_fly.set("speed", fly_speed)
+	if from:   # placed BEFORE it enters the tree, so its _ready takes this as the start (R) and the look angles
+		_fly.transform = global_transform.affine_inverse() * from.global_transform
+	add_child(_fly)
+	_fly.current = true
 
 func _unhandled_input(e: InputEvent) -> void:
 	if Engine.is_editor_hint() or not (e is InputEventKey) or not e.pressed:
@@ -92,4 +124,6 @@ func _unhandled_input(e: InputEvent) -> void:
 		KEY_HOME:
 			frame = FIRST
 		KEY_C:
-			view = 1 - view
+			view = 1 if view == 0 else 0
+		KEY_F:
+			view = 2 if view != 2 else 0

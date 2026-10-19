@@ -31,7 +31,16 @@ Blender side: `F:\WOODCUTS Blender\woodcut alphabet book\` (repo alphabet-book),
   they stand still at her start). Layer 1 only. The accent `Spot` is left out (as every character export: woodCUT
   combines lights with max()). Energies = `watts_to_energy` × 2 (see "Look" below). 3 real lights in all.
 - Inspector on the root: `playing`, `loop`, `speed`, `frame` (drag to scrub, Blender numbering), `view` (Book /
-  Astrid), `play_in_editor`. Run-window keys: **Space** play/pause, **←/→** one frame (Shift: 10), **Home**, **C** camera.
+  Astrid / Fly), `play_in_editor`, `fly_speed`. Run-window keys: **Space** play/pause, **←/→** one frame (Shift: 10),
+  **Home**, **C** Book/Astrid camera, **F** fly camera.
+- **Fly camera (19 Oct):** `fly_cam.gd` copied from Parrots France (+ `addons/spacemouse_native` for the SpaceMouse).
+  F makes a fresh camera at the one you were looking through: hold right mouse to look, W A S D, Q / E down / up,
+  Shift ×4, Ctrl ×¼, wheel = speed, R = back to where it started; F again = Book Camera. Made at run time in
+  `playback.gd`, never saved into the scene. Test: `-s res://tools/fly_check.gd` (headless).
+- **Anti-alias (19 Oct):** Astrid's materials carry the Parrots France teen's settings: Edge AA + Paper Tooth AA on,
+  width 1 px, line fade 2–4 px, Anti-Moire off (the city / props run it with smooth + extras). All her layers are
+  View Aligned with Plate Step 25 in Object space, the aquatint included. Set in the exporter (`write_astrid_materials`).
+  Note: `astrid_godot_export.py -- main` would rewrite `playback.gd` from its template, which has no fly camera.
 
 ## Export command (Godot closed; Blender file only read, never saved)
 
