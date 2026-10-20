@@ -116,3 +116,11 @@ broad table-wood stripes are Blender's own materials (checked against Blender EE
 - The VAT PNGs are plain files: an exported game build needs nothing extra (they are imported textures).
 - Grab-ramp strain / the 6.3-unit jump at frame 227 come from the Blender animation itself.
 - Live page solver, the dragon, gameplay: later.
+
+## Two-sided Astrid + fixed normals (19 Oct 2026)
+- Blender: `rig\tools\astrid_normals.py` turned 261 of her 518 pieces outward (back panels, legs...); 144 ambiguous /
+  interior pieces flagged and left as they were (`rig\normals\normals_applied.json`). Backup:
+  `ASTRID book arena animations BEFORE NORMALS 2026-10-19.blend`.
+- Godot: her materials use `woodCUT_two_sided.gdshader`, a cull_disabled copy of woodCUT.gdshader that the exporter
+  REGENERATES on every export (never edit it; edit woodCUT.gdshader). Single paper sheets now show from behind, as in
+  C4D / Blender. Book and table stay on their own shader.

@@ -13,8 +13,8 @@
 [ext_resource type="Material" path="res://book_import/mat/Page_Edges IMPORT.tres" id="8_k8yr0"]
 [ext_resource type="Material" path="res://book_import/mat/Page_03_A_picture IMPORT.tres" id="9_ucly3"]
 [ext_resource type="Material" path="res://book_import/mat/Table_Wood IMPORT.tres" id="10_sh7de"]
-[ext_resource type="Material" path="res://astrid_import/mat/BODY IMPORT.tres" id="12_h2cp3"]
-[ext_resource type="Material" path="res://astrid_import/mat/DARK IMPORT.tres" id="13_ypca3"]
+[ext_resource type="Material" uid="uid://ci8k58dl1tgkp" path="res://astrid_import/mat/BODY IMPORT.tres" id="12_h2cp3"]
+[ext_resource type="Material" uid="uid://cgklx6bowsiik" path="res://astrid_import/mat/DARK IMPORT.tres" id="13_ypca3"]
 [ext_resource type="Material" uid="uid://cide50bp3oinr" path="res://astrid_import/mat/woodcut_ver_2_Joan_LOW_SHIELD IMPORT.tres" id="14_i76sv"]
 [ext_resource type="Material" uid="uid://bohd5w6vyvimv" path="res://astrid_import/mat/woodcut_ver_2_Joan_MID_SHIELD IMPORT.tres" id="15_et8qb"]
 [ext_resource type="Material" uid="uid://cg8au1ai4virt" path="res://astrid_import/mat/woodcut_ver_2_Joan_UPPER_SHIELD IMPORT.tres" id="16_1bvg4"]
@@ -36,15 +36,15 @@ script = ExtResource("1_play")
 
 [node name="Book (import)" parent="." unique_id=745030896 instance=ExtResource("2_book")]
 
-[node name="Cover Board Left" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="0" unique_id=1550561574]
+[node name="Cover Board Left" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="0" unique_id=745984423]
 layers = 2
 surface_material_override/0 = ExtResource("3_0wje2")
 
-[node name="Cover Board Right" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="1" unique_id=103347922]
+[node name="Cover Board Right" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="1" unique_id=116053773]
 layers = 2
 surface_material_override/0 = ExtResource("3_0wje2")
 
-[node name="Leaf 01" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="2" unique_id=1331224991]
+[node name="Leaf 01" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="2" unique_id=562910004]
 layers = 2
 custom_aabb = AABB(-65.34183, -2.8057222, -44.703094, 130.68372, 20.83942, 89.44679)
 lod_bias = 128.0
@@ -53,42 +53,42 @@ surface_material_override/0 = ExtResource("4_ypiiy")
 surface_material_override/1 = ExtResource("5_knden")
 surface_material_override/2 = ExtResource("6_v0v6s")
 
-[node name="Pastedown + Joint" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="3" unique_id=913860052]
+[node name="Pastedown + Joint" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="3" unique_id=375436837]
 layers = 2
 surface_material_override/0 = ExtResource("7_va3fa")
 surface_material_override/1 = ExtResource("3_0wje2")
 
-[node name="Text Block (leaves 2-30)" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="4" unique_id=329150444]
+[node name="Text Block (leaves 2-30)" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="4" unique_id=416254367]
 layers = 2
 surface_material_override/0 = ExtResource("8_k8yr0")
 surface_material_override/1 = ExtResource("9_ucly3")
 
-[node name="Table Leg" parent="Book (import)/Scale/Book IMPORT meshes" index="1" unique_id=1396864517]
+[node name="Table Leg" parent="Book (import)/Scale/Book IMPORT meshes" index="1" unique_id=1829671036]
 layers = 2
 surface_material_override/0 = ExtResource("10_sh7de")
 
-[node name="Table Leg_001" parent="Book (import)/Scale/Book IMPORT meshes" index="2" unique_id=868929080]
+[node name="Table Leg_001" parent="Book (import)/Scale/Book IMPORT meshes" index="2" unique_id=1685631767]
 layers = 2
 surface_material_override/0 = ExtResource("10_sh7de")
 
-[node name="Table Leg_002" parent="Book (import)/Scale/Book IMPORT meshes" index="3" unique_id=1984582116]
+[node name="Table Leg_002" parent="Book (import)/Scale/Book IMPORT meshes" index="3" unique_id=688145846]
 layers = 2
 surface_material_override/0 = ExtResource("10_sh7de")
 
-[node name="Table Leg_003" parent="Book (import)/Scale/Book IMPORT meshes" index="4" unique_id=1656576348]
+[node name="Table Leg_003" parent="Book (import)/Scale/Book IMPORT meshes" index="4" unique_id=808801670]
 layers = 2
 surface_material_override/0 = ExtResource("10_sh7de")
 
-[node name="Table Top" parent="Book (import)/Scale/Book IMPORT meshes" index="5" unique_id=1545471284]
+[node name="Table Top" parent="Book (import)/Scale/Book IMPORT meshes" index="5" unique_id=1293152588]
 layers = 2
 surface_material_override/0 = ExtResource("10_sh7de")
 
 [node name="Astrid (import)" parent="." unique_id=1875943230 instance=ExtResource("3_astrid")]
 
-[node name="Astrid" parent="Astrid (import)/Scale/Astrid IMPORT meshes" index="0" unique_id=646317263]
+[node name="Astrid" parent="Astrid (import)/Scale/Astrid IMPORT meshes" index="0" unique_id=989034175]
 transform = Transform3D(-0.9893507, 0, 0.1455515, 0, 1, 0, -0.1455515, 0, -0.9893507, 0.4146734, 0, 9.181359)
 
-[node name="Skeleton3D" parent="Astrid (import)/Scale/Astrid IMPORT meshes/Astrid/Astrid Skeleton" index="0" unique_id=1733792855]
+[node name="Skeleton3D" parent="Astrid (import)/Scale/Astrid IMPORT meshes/Astrid/Astrid Skeleton" index="0" unique_id=864211685]
 bones/0/rotation = Quaternion(0, 0.7071068, 0.7071068, 0)
 bones/1/position = Vector3(0.008715865, 1.3013397e-06, 6.4184637)
 bones/1/rotation = Quaternion(6.1614243e-09, 0.77579224, 0.63098, -0.0032703138)
@@ -121,7 +121,7 @@ bones/23/rotation = Quaternion(0.463365, 0.04798286, -0.14634238, 0.87268233)
 bones/24/position = Vector3(1.9762513e-07, 2.2577395, -7.966709e-07)
 bones/24/rotation = Quaternion(-0.54506576, 0.009598954, 0.07841262, 0.8346633)
 
-[node name="Astrid Body" parent="Astrid (import)/Scale/Astrid IMPORT meshes/Astrid/Astrid Skeleton/Skeleton3D" index="0" unique_id=952904334]
+[node name="Astrid Body" parent="Astrid (import)/Scale/Astrid IMPORT meshes/Astrid/Astrid Skeleton/Skeleton3D" index="0" unique_id=849106344]
 surface_material_override/0 = ExtResource("12_h2cp3")
 surface_material_override/1 = ExtResource("13_ypca3")
 surface_material_override/2 = ExtResource("14_i76sv")

@@ -1,6 +1,6 @@
 [gd_resource type="ShaderMaterial" format=3 uid="uid://j6101431aa9bd"]
 
-[ext_resource type="Shader" uid="uid://cvkbi0r6sibtj" path="res://woodCUT.gdshader" id="1_o2mvp"]
+[ext_resource type="Shader" path="res://woodCUT_two_sided.gdshader" id="1_o2mvp"]
 [ext_resource type="Texture2D" path="res://astrid_import/tex/cutout_fleur_de_lis_icon_5.png" id="9_cutout"]
 
 [sub_resource type="FastNoiseLite" id="FastNoiseLite_d4g7g"]

@@ -1,6 +1,6 @@
 [gd_resource type="ShaderMaterial" format=3 uid="uid://j6ec5a4616803"]
 
-[ext_resource type="Shader" uid="uid://cvkbi0r6sibtj" path="res://woodCUT.gdshader" id="1_o2mvp"]
+[ext_resource type="Shader" path="res://woodCUT_two_sided.gdshader" id="1_o2mvp"]
 
 [sub_resource type="FastNoiseLite" id="FastNoiseLite_d4g7g"]
 noise_type = 2
