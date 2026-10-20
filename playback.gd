@@ -4,6 +4,7 @@
 # Keys (run window): Space play / pause, Left / Right one frame (Shift: 10), Home first frame, C switch camera.
 # F = fly camera (fly_cam.gd, as in Parrots France): starts where the current camera is; hold RIGHT mouse to look,
 # W A S D move, Q / E down / up, Shift 4x faster, Ctrl 4x slower, wheel = speed, R = back to the start. F again leaves it.
+# L = Astrid's look: WOODCUT -> FLAT -> C4D -> WOODCUT (astrid_setup.gd `look`; the HUD shows it when not woodcut).
 @tool
 extends Node3D
 
@@ -34,6 +35,7 @@ var _clip := ""
 var _root_motion: Node3D
 var _book: Node
 var _fly: Camera3D
+var _look := "WOODCUT"
 
 func _ready() -> void:
 	var astrid := get_node_or_null("Astrid (import)")
@@ -61,7 +63,8 @@ func _process(delta: float) -> void:
 	var lab := get_node_or_null("HUD/Frame") as Label
 	if lab:
 		lab.visible = show_frame and not Engine.is_editor_hint()
-		lab.text = "frame %d%s" % [int(frame), "" if playing else "  (paused)"]
+		lab.text = "frame %d%s%s" % [int(frame), "" if playing else "  (paused)",
+				"" if _look == "WOODCUT" else "  look " + _look]
 
 func _apply() -> void:
 	if not is_inside_tree():
@@ -127,3 +130,8 @@ func _unhandled_input(e: InputEvent) -> void:
 			view = 1 if view == 0 else 0
 		KEY_F:
 			view = 2 if view != 2 else 0
+		KEY_L:   # Astrid's look: WOODCUT -> FLAT -> C4D (astrid_setup.gd, 20 Oct 2026)
+			var a := get_node_or_null("Astrid (import)")
+			if a and a.has_method("next_look"):
+				_look = a.next_look()
+				print("look: ", _look)

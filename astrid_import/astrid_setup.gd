@@ -7,6 +7,9 @@ extends Node3D
 
 const IMPORT_MAT := "res://astrid_import/mat/"
 const MAIN_MAT := "res://astrid_main/mat/"
+# alternative looks (20 Oct 2026): res://astrid_import/mat/looks/<FLAT|C4D>/<stem> LOOK.tres (a file in
+# res://astrid_main/mat/looks/<LOOK>/<stem> MAIN.tres wins). A look without a file for a surface keeps the woodcut.
+const LOOKS := ["WOODCUT", "FLAT", "C4D"]
 # Blender material name -> file name stem
 const MATERIALS := {
 	 "BODY": "BODY",
@@ -17,8 +20,17 @@ const MATERIALS := {
 	}
 # render layer bit for every Astrid mesh (her salon spots light layer 1 only; the Book Light lights layer 2 only)
 @export_flags_3d_render var layers := 1
+## Woodcut (default) / Flat (plain lit gray) / C4D (Orion's Cinema 4D page-edge scan look). Run window: L cycles.
+@export_enum("Woodcut", "Flat", "C4D") var look := 0:
+	set(v):
+		look = clampi(v, 0, LOOKS.size() - 1)
+		if is_inside_tree():
+			_apply_look()
 
 func _ready() -> void:
+	_apply_look()
+
+func _apply_look() -> void:
 	for mi in find_children("*", "MeshInstance3D", true, false):
 		mi.layers = layers
 		var mesh: Mesh = mi.mesh
@@ -27,14 +39,32 @@ func _ready() -> void:
 		for i in mesh.get_surface_count():
 			var m := mesh.surface_get_material(i)
 			var nm: String = m.resource_name if m and m.resource_name != "" else mesh.surface_get_name(i)
-			if MATERIALS.has(nm):
-				mi.set_surface_override_material(i, _material(MATERIALS[nm]))
+			if not MATERIALS.has(nm):
+				# a surface already on an override keeps its Blender name in the mesh's own material
+				continue
+			mi.set_surface_override_material(i, _material(MATERIALS[nm]))
 
 func _material(stem: String) -> Material:
+	if look > 0:
+		var lk: String = LOOKS[look]
+		var pm := MAIN_MAT + "looks/" + lk + "/" + stem + " MAIN.tres"
+		if ResourceLoader.exists(pm):
+			return load(pm)
+		var pl := IMPORT_MAT + "looks/" + lk + "/" + stem + " LOOK.tres"
+		if ResourceLoader.exists(pl):
+			return load(pl)
 	var p := MAIN_MAT + stem + " MAIN.tres"
 	if ResourceLoader.exists(p):
 		return load(p)
 	return load(IMPORT_MAT + stem + " IMPORT.tres")
+
+## the next look (WOODCUT -> FLAT -> C4D -> WOODCUT); returns its name
+func next_look() -> String:
+	look = (look + 1) % LOOKS.size()
+	return LOOKS[look]
+
+func look_name() -> String:
+	return LOOKS[look]
 
 ## the imported AnimationPlayer (clip "ASTRID walk + page turn", 30 fps, Blender frame 1 = 0 s)
 func get_animation_player() -> AnimationPlayer:

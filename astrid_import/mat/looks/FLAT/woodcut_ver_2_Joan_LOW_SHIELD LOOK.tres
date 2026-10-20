@@ -1,0 +1,20 @@
+[gd_resource type="ShaderMaterial" format=3]
+
+[ext_resource type="Shader" path="res://astrid_import/looks/astrid_look_cutout.gdshader" id="1_shader"]
+[ext_resource type="Texture2D" path="res://astrid_import/tex/scan_tone_4k.png" id="2_tone"]
+[ext_resource type="Texture2D" path="res://astrid_import/tex/cutout_fleur_de_lis_icon_2.png" id="3_cut"]
+
+[resource]
+resource_name = "woodcut ver 2 Joan LOW SHIELD FLAT"
+render_priority = 0
+shader = ExtResource("1_shader")
+shader_parameter/paper_color = Vector3(0.55000, 0.55000, 0.55000)
+shader_parameter/light_gain = 2.0
+shader_parameter/fill = 0.25
+shader_parameter/use_tone = false
+shader_parameter/tone_tex = ExtResource("2_tone")
+shader_parameter/tone_channel = Vector4(1.0, 0.0, 0.0, 0.0)
+shader_parameter/line_dark = 0.12
+shader_parameter/line_mix = 1.0
+shader_parameter/cutout_tex = ExtResource("3_cut")
+shader_parameter/cutout_threshold = 0.5

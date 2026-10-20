@@ -10,6 +10,23 @@
   "pieces": 520,
   "verts": 109354,
   "faces": 82510,
+  "looks": [
+   "BODY",
+   "DARK",
+   "woodcut ver 2 Joan LOW SHIELD",
+   "woodcut ver 2 Joan MID SHIELD",
+   "woodcut ver 2 Joan UPPER SHIELD"
+  ],
+  "c4d_uv_loops": {
+   "main cat body": 292272,
+   "BODY main section": 528,
+   "Teeth Hands Eyebrows": 7532,
+   "skull lower rear jowls": 468,
+   "LOW SHIELD": 456,
+   "MID SHIELD": 20390,
+   "UPPER SHIELD": 272,
+   "throat": 776
+  },
   "materials": {
    "BODY": "BODY",
    "DARK": "DARK",
