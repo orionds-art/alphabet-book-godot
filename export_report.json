@@ -8,8 +8,8 @@
  "fps": 30,
  "astrid": {
   "pieces": 520,
-  "verts": 123283,
-  "faces": 107192,
+  "verts": 166319,
+  "faces": 148172,
   "looks": [
    "BODY",
    "DARK",
@@ -18,10 +18,10 @@
    "woodcut ver 2 Joan UPPER SHIELD"
   ],
   "c4d_uv_loops": {
-   "main cat body": 350836,
+   "main cat body": 468114,
    "BODY main section": 528,
-   "Teeth Hands Eyebrows": 11075,
-   "skull lower rear jowls": 1654,
+   "Teeth Hands Eyebrows": 16841,
+   "skull lower rear jowls": 3606,
    "LOW SHIELD": 456,
    "MID SHIELD": 20390,
    "UPPER SHIELD": 272,
