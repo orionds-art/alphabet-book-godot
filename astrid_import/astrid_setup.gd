@@ -9,8 +9,8 @@ const IMPORT_MAT := "res://astrid_import/mat/"
 const MAIN_MAT := "res://astrid_main/mat/"
 # Blender material name -> file name stem
 const MATERIALS := {
-	 "woodcut ver 2 Joan": "woodcut_ver_2_Joan",
-	 "block cut hair": "block_cut_hair",
+	 "BODY": "BODY",
+	 "DARK": "DARK",
 	 "woodcut ver 2 Joan LOW SHIELD": "woodcut_ver_2_Joan_LOW_SHIELD",
 	 "woodcut ver 2 Joan MID SHIELD": "woodcut_ver_2_Joan_MID_SHIELD",
 	 "woodcut ver 2 Joan UPPER SHIELD": "woodcut_ver_2_Joan_UPPER_SHIELD"

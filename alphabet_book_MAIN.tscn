@@ -1,70 +1,172 @@
-[gd_scene format=3]
+[gd_scene format=3 uid="uid://bq4i5yuaiw77g"]
 
-[ext_resource type="Script" path="res://playback.gd" id="1_play"]
+[ext_resource type="Script" uid="uid://cpipq4itylclx" path="res://playback.gd" id="1_play"]
 [ext_resource type="PackedScene" path="res://book_import/book_IMPORT.tscn" id="2_book"]
+[ext_resource type="Material" path="res://book_import/mat/Book_Cloth IMPORT.tres" id="3_0wje2"]
 [ext_resource type="PackedScene" path="res://astrid_import/astrid_IMPORT.tscn" id="3_astrid"]
-[ext_resource type="Texture2D" path="res://paper/BLANK WATERCOLOR PAPER.png" id="4_paper"]
-[ext_resource type="Shader" path="res://paper/paper_scan.gdshader" id="5_scan"]
-
-[sub_resource type="ShaderMaterial" id="mul"]
-shader = ExtResource("5_scan")
-shader_parameter/contrast = 4.000
-shader_parameter/scan_mean = 0.8435
+[ext_resource type="Texture2D" uid="uid://b6phcpbc04b6c" path="res://paper/BLANK WATERCOLOR PAPER.png" id="4_paper"]
+[ext_resource type="Material" path="res://book_import/mat/Page_01_title IMPORT.tres" id="4_ypiiy"]
+[ext_resource type="Material" path="res://book_import/mat/Page_02_A_letter IMPORT.tres" id="5_knden"]
+[ext_resource type="Shader" uid="uid://cfh2wdtl7k3fq" path="res://paper/paper_scan.gdshader" id="5_scan"]
+[ext_resource type="Material" path="res://book_import/mat/Leaf_Edge IMPORT.tres" id="6_v0v6s"]
+[ext_resource type="Material" path="res://book_import/mat/Endpaper IMPORT.tres" id="7_va3fa"]
+[ext_resource type="Material" path="res://book_import/mat/Page_Edges IMPORT.tres" id="8_k8yr0"]
+[ext_resource type="Material" path="res://book_import/mat/Page_03_A_picture IMPORT.tres" id="9_ucly3"]
+[ext_resource type="Material" path="res://book_import/mat/Table_Wood IMPORT.tres" id="10_sh7de"]
+[ext_resource type="Material" path="res://astrid_import/mat/BODY IMPORT.tres" id="12_h2cp3"]
+[ext_resource type="Material" path="res://astrid_import/mat/DARK IMPORT.tres" id="13_ypca3"]
+[ext_resource type="Material" uid="uid://cide50bp3oinr" path="res://astrid_import/mat/woodcut_ver_2_Joan_LOW_SHIELD IMPORT.tres" id="14_i76sv"]
+[ext_resource type="Material" uid="uid://bohd5w6vyvimv" path="res://astrid_import/mat/woodcut_ver_2_Joan_MID_SHIELD IMPORT.tres" id="15_et8qb"]
+[ext_resource type="Material" uid="uid://cg8au1ai4virt" path="res://astrid_import/mat/woodcut_ver_2_Joan_UPPER_SHIELD IMPORT.tres" id="16_1bvg4"]
 
 [sub_resource type="Environment" id="env"]
 background_mode = 1
-background_color = Color(1.0000, 1.0000, 1.0000, 1)
+background_color = Color(1, 1, 1, 1)
 ambient_light_source = 2
 ambient_light_color = Color(1, 1, 1, 1)
 ambient_light_energy = 0.0
-tonemap_mode = 0
-glow_enabled = false
 
-[node name="Alphabet Book MAIN" type="Node3D"]
+[sub_resource type="ShaderMaterial" id="mul"]
+shader = ExtResource("5_scan")
+shader_parameter/contrast = 2.9030001378925
+shader_parameter/scan_mean = 0.8435
+
+[node name="Alphabet Book MAIN" type="Node3D" unique_id=785903583]
 script = ExtResource("1_play")
 
-[node name="Book (import)" parent="." instance=ExtResource("2_book")]
+[node name="Book (import)" parent="." unique_id=745030896 instance=ExtResource("2_book")]
 
-[node name="Astrid (import)" parent="." instance=ExtResource("3_astrid")]
+[node name="Cover Board Left" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="0" unique_id=1550561574]
+layers = 2
+surface_material_override/0 = ExtResource("3_0wje2")
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+[node name="Cover Board Right" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="1" unique_id=103347922]
+layers = 2
+surface_material_override/0 = ExtResource("3_0wje2")
+
+[node name="Leaf 01" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="2" unique_id=1331224991]
+layers = 2
+custom_aabb = AABB(-65.34183, -2.8057222, -44.703094, 130.68372, 20.83942, 89.44679)
+lod_bias = 128.0
+instance_shader_parameters/vat_frame = 1.0
+surface_material_override/0 = ExtResource("4_ypiiy")
+surface_material_override/1 = ExtResource("5_knden")
+surface_material_override/2 = ExtResource("6_v0v6s")
+
+[node name="Pastedown + Joint" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="3" unique_id=913860052]
+layers = 2
+surface_material_override/0 = ExtResource("7_va3fa")
+surface_material_override/1 = ExtResource("3_0wje2")
+
+[node name="Text Block (leaves 2-30)" parent="Book (import)/Scale/Book IMPORT meshes/BOOK" index="4" unique_id=329150444]
+layers = 2
+surface_material_override/0 = ExtResource("8_k8yr0")
+surface_material_override/1 = ExtResource("9_ucly3")
+
+[node name="Table Leg" parent="Book (import)/Scale/Book IMPORT meshes" index="1" unique_id=1396864517]
+layers = 2
+surface_material_override/0 = ExtResource("10_sh7de")
+
+[node name="Table Leg_001" parent="Book (import)/Scale/Book IMPORT meshes" index="2" unique_id=868929080]
+layers = 2
+surface_material_override/0 = ExtResource("10_sh7de")
+
+[node name="Table Leg_002" parent="Book (import)/Scale/Book IMPORT meshes" index="3" unique_id=1984582116]
+layers = 2
+surface_material_override/0 = ExtResource("10_sh7de")
+
+[node name="Table Leg_003" parent="Book (import)/Scale/Book IMPORT meshes" index="4" unique_id=1656576348]
+layers = 2
+surface_material_override/0 = ExtResource("10_sh7de")
+
+[node name="Table Top" parent="Book (import)/Scale/Book IMPORT meshes" index="5" unique_id=1545471284]
+layers = 2
+surface_material_override/0 = ExtResource("10_sh7de")
+
+[node name="Astrid (import)" parent="." unique_id=1875943230 instance=ExtResource("3_astrid")]
+
+[node name="Astrid" parent="Astrid (import)/Scale/Astrid IMPORT meshes" index="0" unique_id=646317263]
+transform = Transform3D(-0.9893507, 0, 0.1455515, 0, 1, 0, -0.1455515, 0, -0.9893507, 0.4146734, 0, 9.181359)
+
+[node name="Skeleton3D" parent="Astrid (import)/Scale/Astrid IMPORT meshes/Astrid/Astrid Skeleton" index="0" unique_id=1733792855]
+bones/0/rotation = Quaternion(0, 0.7071068, 0.7071068, 0)
+bones/1/position = Vector3(0.008715865, 1.3013397e-06, 6.4184637)
+bones/1/rotation = Quaternion(6.1614243e-09, 0.77579224, 0.63098, -0.0032703138)
+bones/3/position = Vector3(6.7631944e-09, 1.5216581, -1.8019107e-06)
+bones/3/rotation = Quaternion(0.24814105, -0.09594998, 0.1913544, 0.9447768)
+bones/4/position = Vector3(9.278709e-08, 2.5130277, -9.565375e-07)
+bones/4/rotation = Quaternion(-0.46399307, -0.03695373, 0.01671718, 0.8849098)
+bones/5/position = Vector3(1.6708105e-07, 2.7021408, 9.43557e-08)
+bones/5/rotation = Quaternion(-0.43409362, -0.012279214, 0.00075908226, 0.9007838)
+bones/7/position = Vector3(-3.3893065e-07, 1.5216604, 1.154569e-06)
+bones/7/rotation = Quaternion(0.248141, 0.09595019, -0.19135468, 0.9447768)
+bones/8/position = Vector3(-9.574125e-07, 2.5130286, -1.3362851e-06)
+bones/8/rotation = Quaternion(-0.46399298, 0.03695378, -0.016717184, 0.88490987)
+bones/9/rotation = Quaternion(-0.43409377, 0.012279013, -0.0007589192, 0.9007837)
+bones/10/rotation = Quaternion(-0.0822495, -0.002358787, -0.0022651986, 0.9966064)
+bones/11/position = Vector3(2.6999565e-09, 0.7734157, -6.9629624e-07)
+bones/11/rotation = Quaternion(0.121974476, 1.0939917e-05, 1.0498024e-05, 0.9925333)
+bones/12/position = Vector3(-1.519124e-08, 1.9135072, 5.555001e-07)
+bones/12/rotation = Quaternion(-0.1881108, 0.00027028765, 0.00019889322, 0.9821478)
+bones/13/position = Vector3(-1.8007535e-08, 1.3339185, -2.9457357e-07)
+bones/13/rotation = Quaternion(0.063324854, -0.0010551235, -0.0011256705, 0.9979918)
+bones/16/position = Vector3(1.3833457e-08, 1.1187758, 1.1887976e-06)
+bones/16/rotation = Quaternion(-0.1622553, 0.03888449, 0.03888446, 0.98521537)
+bones/18/rotation = Quaternion(0.4633651, -0.047982935, 0.14634232, 0.8726823)
+bones/19/position = Vector3(-3.4442036e-07, 2.2577403, 8.4476187e-07)
+bones/19/rotation = Quaternion(-0.5450659, -0.009598921, -0.078412645, 0.8346631)
+bones/20/position = Vector3(2.1143408e-07, 2.6727917, 2.1008043e-07)
+bones/23/position = Vector3(-4.214006e-07, 0.9541381, -1.521687e-08)
+bones/23/rotation = Quaternion(0.463365, 0.04798286, -0.14634238, 0.87268233)
+bones/24/position = Vector3(1.9762513e-07, 2.2577395, -7.966709e-07)
+bones/24/rotation = Quaternion(-0.54506576, 0.009598954, 0.07841262, 0.8346633)
+
+[node name="Astrid Body" parent="Astrid (import)/Scale/Astrid IMPORT meshes/Astrid/Astrid Skeleton/Skeleton3D" index="0" unique_id=952904334]
+surface_material_override/0 = ExtResource("12_h2cp3")
+surface_material_override/1 = ExtResource("13_ypca3")
+surface_material_override/2 = ExtResource("14_i76sv")
+surface_material_override/3 = ExtResource("15_et8qb")
+surface_material_override/4 = ExtResource("16_1bvg4")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1353345383]
 environment = SubResource("env")
 
-[node name="Book Light" type="DirectionalLight3D" parent="."]
-transform = Transform3D(0.785161, -0.618163, 0.037384, 0.425939, 0.582857, 0.691992, -0.449553, -0.527402, 0.720936, 0.000000, -0.323596, 0.000000)
+[node name="Book Light" type="DirectionalLight3D" parent="." unique_id=80282930]
+transform = Transform3D(0.785161, -0.618163, 0.037384, 0.425939, 0.582857, 0.691992, -0.449553, -0.527402, 0.720936, 0, -0.323596, 0)
 light_energy = 0.9549
+light_angular_distance = 6.51
 light_cull_mask = 4294967294
 shadow_enabled = true
 directional_shadow_max_distance = 40.0
 
-[node name="Book Camera" type="Camera3D" parent="."]
-transform = Transform3D(1.000000, 0.000000, 0.000000, 0.000000, 0.802910, 0.596100, 0.000000, -0.596100, 0.802910, -2.924545, 8.363637, 11.636364)
-fov = 36.0000
-near = 0.05
-far = 100.0
+[node name="Book Camera" type="Camera3D" parent="." unique_id=1966628328]
+transform = Transform3D(1, 0, 0, 0, 0.80291, 0.5961, 0, -0.5961, 0.80291, -2.924545, 8.363637, 11.636364)
 current = true
+fov = 36.0
+far = 100.0
 
-[node name="Astrid Follow" type="Node3D" parent="."]
+[node name="Astrid Follow" type="Node3D" parent="." unique_id=1972960673]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.037697583, 0, 0.83466905)
 
-[node name="Astrid Camera" type="Camera3D" parent="Astrid Follow"]
-transform = Transform3D(1.000000, 0.000000, 0.000000, 0.000000, 1.000000, -0.000000, 0.000000, 0.000000, 1.000000, -0.000000, 0.850087, 3.691637)
+[node name="Astrid Camera" type="Camera3D" parent="Astrid Follow" unique_id=1438225617]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.850087, 3.691637)
 fov = 25.3608
 near = 0.02
 far = 100.0
 
-[node name="Astrid Body Light" type="SpotLight3D" parent="Astrid Follow"]
-transform = Transform3D(0.044065, -0.981103, 0.188403, 0.805477, 0.146450, 0.574246, -0.590986, 0.126451, 0.796709, 0.270068, 1.805644, 2.545349)
+[node name="Astrid Body Light" type="SpotLight3D" parent="Astrid Follow" unique_id=296687274]
+transform = Transform3D(0.044065, -0.981103, 0.188403, 0.805477, 0.14645, 0.574246, -0.590986, 0.126451, 0.796709, 0.270068, 1.805644, 2.545349)
 light_energy = 3.27522
 light_cull_mask = 1
 shadow_enabled = true
 spot_range = 30.0
 spot_attenuation = 2.0
-spot_angle = 30.040
+spot_angle = 30.04
 spot_angle_attenuation = 1.956
 
-[node name="Light" type="SpotLight3D" parent="Astrid Follow"]
-transform = Transform3D(0.365466, -0.899874, 0.238037, 0.157885, 0.311950, 0.936888, -0.917337, -0.304818, 0.256084, 0.270068, 2.644171, 0.400934)
-light_energy = 1.17780
+[node name="Light" type="SpotLight3D" parent="Astrid Follow" unique_id=183412799]
+transform = Transform3D(0.36546597, -0.8998739, 0.2380371, 0.15788499, 0.3119501, 0.9368882, -0.9173369, -0.30481827, 0.25608373, 1.314898, 3.4304397, 0.45498472)
+light_energy = 4.527
 light_cull_mask = 1
 shadow_enabled = true
 spot_range = 30.0
@@ -72,26 +174,31 @@ spot_attenuation = 2.0
 spot_angle = 36.534
 spot_angle_attenuation = 1.956
 
-[node name="Paper" type="CanvasLayer" parent="."]
-layer = 1
+[node name="Paper" type="CanvasLayer" parent="." unique_id=1402802377]
 
-[node name="Scan" type="TextureRect" parent="Paper"]
+[node name="Scan" type="TextureRect" parent="Paper" unique_id=695816347]
 material = SubResource("mul")
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
+mouse_filter = 2
 texture = ExtResource("4_paper")
 expand_mode = 1
 stretch_mode = 6
-mouse_filter = 2
 
-[node name="HUD" type="CanvasLayer" parent="."]
+[node name="HUD" type="CanvasLayer" parent="." unique_id=2076636593]
 layer = 2
 
-[node name="Frame" type="Label" parent="HUD"]
+[node name="Frame" type="Label" parent="HUD" unique_id=1894478885]
+visible = false
 offset_left = 16.0
 offset_top = 12.0
 offset_right = 400.0
 offset_bottom = 40.0
 theme_override_colors/font_color = Color(0.2, 0.1, 0.1, 1)
 text = "frame 1"
+
+[editable path="Book (import)"]
+[editable path="Book (import)/Scale/Book IMPORT meshes"]
+[editable path="Astrid (import)"]
+[editable path="Astrid (import)/Scale/Astrid IMPORT meshes"]

@@ -6,10 +6,7 @@
 render_priority = 0
 shader = ExtResource("1_shader")
 shader_parameter/roughness_value = 0.85
-shader_parameter/ramp_a = Vector3(0.18, 0.24, 0.33)
-shader_parameter/ramp_b = Vector3(0.62, 0.56, 0.42)
-shader_parameter/color_mode = 3
-shader_parameter/wave_axis = 0
-shader_parameter/tex_scale = 0.05781619995832443
-shader_parameter/tex_distortion = 9.0
-shader_parameter/tex_detail = 3.0
+shader_parameter/ramp_a = Vector3(0.24093, 0.29903, 0.33001)
+shader_parameter/ramp_b = Vector3(0.44674, 0.59625, 0.62003)
+shader_parameter/color_mode = 0
+shader_parameter/base_color = Vector3(0.8, 0.8, 0.8)
