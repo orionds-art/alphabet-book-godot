@@ -6,25 +6,6 @@
   1050
  ],
  "fps": 30,
- "leaf_solidify_error": 0.0009576939716566812,
- "vat": {
-  "vertices": 12513,
-  "rows": 1004,
-  "step": 1,
-  "first_frame": 1,
-  "last_frame": 1004,
-  "round_trip_max_error": 0.000981790850090647
- },
- "book_materials": {
-  "Book Cloth": "Book_Cloth",
-  "Endpaper": "Endpaper",
-  "Page Edges": "Page_Edges",
-  "Page 03 (A picture)": "Page_03_A_picture",
-  "Page 01 (title)": "Page_01_title",
-  "Page 02 (A letter)": "Page_02_A_letter",
-  "Leaf Edge": "Leaf_Edge",
-  "Table Wood": "Table_Wood"
- },
  "astrid": {
   "pieces": 504,
   "verts": 185571,
@@ -52,11 +33,16 @@
    "woodcut ver 2 Joan LOW SHIELD": "woodcut_ver_2_Joan_LOW_SHIELD",
    "woodcut ver 2 Joan MID SHIELD": "woodcut_ver_2_Joan_MID_SHIELD",
    "woodcut ver 2 Joan UPPER SHIELD": "woodcut_ver_2_Joan_UPPER_SHIELD"
+  },
+  "tail_shed": {
+   "action": "ASTRID walk + page turn + tail",
+   "events": 26,
+   "flakes": 26
   }
  },
  "verify": {
   "piece_vs_bone_rest_max": 2.4397667445441584e-05,
-  "export_rig_vs_original_max": 8.58306884765625e-06
+  "export_rig_vs_original_max": 3.0517578125e-05
  },
  "pattern_anchor_at_rest": [
   0.0,
@@ -89,5 +75,24 @@
    0.3636,
    -0.1642
   ]
+ },
+ "leaf_solidify_error": 0.0009576939716566812,
+ "vat": {
+  "vertices": 12513,
+  "rows": 1004,
+  "step": 1,
+  "first_frame": 1,
+  "last_frame": 1004,
+  "round_trip_max_error": 0.000981790850090647
+ },
+ "book_materials": {
+  "Book Cloth": "Book_Cloth",
+  "Endpaper": "Endpaper",
+  "Page Edges": "Page_Edges",
+  "Page 03 (A picture)": "Page_03_A_picture",
+  "Page 01 (title)": "Page_01_title",
+  "Page 02 (A letter)": "Page_02_A_letter",
+  "Leaf Edge": "Leaf_Edge",
+  "Table Wood": "Table_Wood"
  }
 }

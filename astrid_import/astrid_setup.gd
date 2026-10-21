@@ -29,6 +29,17 @@ const MATERIALS := {
 
 func _ready() -> void:
 	_apply_look()
+	# tuft shedding (21 Oct 2026): run window / game only, never in the editor, never saved into a scene
+	if not Engine.is_editor_hint() and FileAccess.file_exists("res://astrid_import/tail_shed_events.json") \
+			and ResourceLoader.exists("res://astrid_import/tail_shed.gd"):
+		var ts := Node3D.new()
+		ts.name = "Tail Shed"
+		ts.set_script(load("res://astrid_import/tail_shed.gd"))
+		add_child(ts)
+
+## the tuft shedding node (null when off): tail_shed.gd, burst(strength, flakes) for gameplay
+func get_tail_shed() -> Node:
+	return get_node_or_null("Tail Shed")
 
 func _apply_look() -> void:
 	for mi in find_children("*", "MeshInstance3D", true, false):
