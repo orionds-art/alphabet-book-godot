@@ -20,7 +20,7 @@ const MATERIALS := {
 	}
 const LEAF := "Leaf 01"
 # the bake's bounding box (leaf mesh space, Blender units): the leaf's culling box, since the shader moves it
-const VAT_AABB := AABB(Vector3(-64.34182739257812, -1.8057222366333008, -43.703094482421875), Vector3(128.6837158203125, 18.8394193649292, 87.4467887878418))
+const VAT_AABB := AABB(Vector3(-64.34182739257812, -1.8057222366333008, -43.703651428222656), Vector3(128.6837158203125, 18.839421272277832, 87.44867706298828))
 
 @export_flags_3d_render var layers := 2
 @export_range(1.0, 1050.0, 0.01) var frame := 1.0:
