@@ -30,20 +30,20 @@ const LOOKS := ["WOODCUT", "FLAT", "C4D"]
 @export var playing := true
 ## fighter B starts this many frames later in the same clip
 @export var fighter_b_offset := 525.0
-## Crisp hero shadows: the Book Light keeps its big soft sun size for the book and table, but no longer casts the
-## fighters' shadows. A second sun (same direction, small sun size) casts only the fighters, and a matching negative
-## sun cancels its extra light, so the only thing it adds is a crisp fighter shadow. Run window: 8 toggles.
+## Crisp hero shadows (hero_shadows.gd): the Book Light keeps its big soft sun size for the book and table, the
+## fighters' shadows come from a small-sun copy. Run window: 8 toggles.
 @export var crisp_hero_shadows := true:
 	set(v):
 		crisp_hero_shadows = v
-		if is_inside_tree():
-			_hero_shadow_apply()
+		if _hero:
+			_hero.enabled = v
+			_hero.apply()
 ## sun size of the fighters' shadows, in degrees (the Book Light's own size stays as it is)
 @export_range(0.0, 10.0, 0.01) var hero_shadow_size := 0.5:
 	set(v):
 		hero_shadow_size = v
-		if _hero_sun:
-			_hero_sun.light_angular_distance = v
+		if _hero:
+			_hero.set_size(v)
 ## follow cameras: distance behind the fighter and height, in meters
 @export var camera_distance := 4.5
 @export var camera_height := 1.6
@@ -77,9 +77,8 @@ var _flakes := true
 var _shadows := true
 var _b_lights := true
 var _last_us := 0
-var _hero_sun: DirectionalLight3D
-var _hero_cancel: DirectionalLight3D
-const HERO_LAYER := 1   # Astrid's render layer (astrid_setup.gd layers = 1; flakes 1 | 2)
+var _hero   # hero_shadows.gd
+const HeroShadows := preload("res://hero_shadows.gd")
 var _frame_ms: Array[float] = []
 
 func _ready() -> void:
@@ -98,7 +97,9 @@ func _ready() -> void:
 	_layout()
 	_apply()
 	set_look(_look)
-	_hero_shadow_build()
+	_hero = HeroShadows.new()
+	_hero.enabled = crisp_hero_shadows
+	_hero.build(_sun, hero_shadow_size)
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 1 and args[0] == "measure":
 		_measure.call_deferred(args[1])
@@ -229,32 +230,8 @@ func set_shadows(on: bool) -> void:
 	_sun.shadow_enabled = on
 	for l in _lights_a.get_children() + _lights_b.get_children():
 		(l as Light3D).shadow_enabled = on
-	_hero_shadow_apply()
-
-# two extra suns copied from the Book Light: one casting only the fighters (crisp), one negative with no shadow
-func _hero_shadow_build() -> void:
-	_hero_sun = _sun.duplicate() as DirectionalLight3D
-	_hero_sun.name = "Hero Shadow Sun"
-	_hero_sun.light_angular_distance = hero_shadow_size
-	_hero_sun.shadow_caster_mask = HERO_LAYER
-	_hero_cancel = _sun.duplicate() as DirectionalLight3D
-	_hero_cancel.name = "Hero Shadow Cancel"
-	_hero_cancel.light_negative = true
-	_hero_cancel.shadow_enabled = false
-	_sun.add_sibling(_hero_sun)
-	_sun.add_sibling(_hero_cancel)
-	_hero_shadow_apply()
-
-func _hero_shadow_apply() -> void:
-	if _hero_sun == null:
-		return
-	var on := crisp_hero_shadows and _shadows
-	_sun.shadow_caster_mask = 0xFFFFF & ~HERO_LAYER if on else 0xFFFFF
-	_hero_sun.visible = on
-	_hero_cancel.visible = on
-	for l in [_hero_sun, _hero_cancel]:
-		l.light_energy = _sun.light_energy
-		l.light_color = _sun.light_color
+	if _hero:
+		_hero.apply()
 
 func set_b_lights(on: bool) -> void:
 	_b_lights = on

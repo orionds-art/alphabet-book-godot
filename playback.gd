@@ -5,8 +5,12 @@
 # F = fly camera (fly_cam.gd, as in Parrots France): starts where the current camera is; hold RIGHT mouse to look,
 # W A S D move, Q / E down / up, Shift 4x faster, Ctrl 4x slower, wheel = speed, R = back to the start. F again leaves it.
 # L = Astrid's look: WOODCUT -> FLAT -> C4D -> WOODCUT (astrid_setup.gd `look`; the HUD shows it when not woodcut).
+# H = crisp hero shadows on / off (hero_shadows.gd: the Book Light stays soft for the book and table, Astrid's shadow
+# comes from a small-sun copy). Run window only; the editor shows the plain Book Light.
 @tool
 extends Node3D
+
+const HeroShadows := preload("res://hero_shadows.gd")
 
 const FPS := 30.0
 const FIRST := 1.0
@@ -29,6 +33,19 @@ const LAST := 1050.0
 ## play in the editor viewport too (off: the editor only follows `frame`)
 @export var play_in_editor := false
 @export var show_frame := true
+## Astrid's shadow crisp while the Book Light stays soft (run window only; H toggles)
+@export var crisp_hero_shadows := true:
+	set(v):
+		crisp_hero_shadows = v
+		if _hero:
+			_hero.enabled = v
+			_hero.apply()
+## sun size of Astrid's shadow, in degrees (the Book Light's own sun size stays as it is)
+@export_range(0.0, 10.0, 0.01) var hero_shadow_size := 0.5:
+	set(v):
+		hero_shadow_size = v
+		if _hero:
+			_hero.set_size(v)
 
 var _ap: AnimationPlayer
 var _clip := ""
@@ -36,6 +53,7 @@ var _root_motion: Node3D
 var _book: Node
 var _fly: Camera3D
 var _look := "WOODCUT"
+var _hero   # hero_shadows.gd, built in the run window only
 
 func _ready() -> void:
 	var astrid := get_node_or_null("Astrid (import)")
@@ -53,6 +71,11 @@ func _ready() -> void:
 			_ap.pause()
 	_apply_camera()
 	_apply()
+	var sun := get_node_or_null("Book Light") as DirectionalLight3D
+	if sun and not Engine.is_editor_hint():
+		_hero = HeroShadows.new()
+		_hero.enabled = crisp_hero_shadows
+		_hero.build(sun, hero_shadow_size)
 
 func _process(delta: float) -> void:
 	if playing and (not Engine.is_editor_hint() or play_in_editor):
@@ -63,8 +86,9 @@ func _process(delta: float) -> void:
 	var lab := get_node_or_null("HUD/Frame") as Label
 	if lab:
 		lab.visible = show_frame and not Engine.is_editor_hint()
-		lab.text = "frame %d%s%s" % [int(frame), "" if playing else "  (paused)",
-				"" if _look == "WOODCUT" else "  look " + _look]
+		lab.text = "frame %d%s%s%s" % [int(frame), "" if playing else "  (paused)",
+				"" if _look == "WOODCUT" else "  look " + _look,
+				"" if crisp_hero_shadows else "  soft hero shadows"]
 
 func _apply() -> void:
 	if not is_inside_tree():
@@ -130,6 +154,8 @@ func _unhandled_input(e: InputEvent) -> void:
 			view = 1 if view == 0 else 0
 		KEY_F:
 			view = 2 if view != 2 else 0
+		KEY_H:
+			crisp_hero_shadows = not crisp_hero_shadows
 		KEY_L:   # Astrid's look: WOODCUT -> FLAT -> C4D (astrid_setup.gd, 20 Oct 2026)
 			var a := get_node_or_null("Astrid (import)")
 			if a and a.has_method("next_look"):
