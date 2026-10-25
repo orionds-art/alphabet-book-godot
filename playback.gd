@@ -5,8 +5,9 @@
 # F = fly camera (fly_cam.gd, as in Parrots France): starts where the current camera is; hold RIGHT mouse to look,
 # W A S D move, Q / E down / up, Shift 4x faster, Ctrl 4x slower, wheel = speed, R = back to the start. F again leaves it.
 # L = Astrid's look: WOODCUT -> FLAT -> C4D -> WOODCUT (astrid_setup.gd `look`; the HUD shows it when not woodcut).
-# H = crisp hero shadows on / off (hero_shadows.gd: the Book Light stays soft for the book and table, Astrid's shadow
-# comes from a small-sun copy). Run window only; the editor shows the plain Book Light.
+# H = shadow mode (hero_shadows.gd): ONE SUN (crisp Book Light + a fake soft book shadow on the table; default) ->
+# SUN PAIR (soft Book Light + a crisp copy for Astrid) -> SOFT (the Book Light as saved). Run window only; the editor
+# shows the plain Book Light.
 @tool
 extends Node3D
 
@@ -33,19 +34,21 @@ const LAST := 1050.0
 ## play in the editor viewport too (off: the editor only follows `frame`)
 @export var play_in_editor := false
 @export var show_frame := true
-## Astrid's shadow crisp while the Book Light stays soft (run window only; H toggles)
-@export var crisp_hero_shadows := true:
+## crisp Astrid shadows (hero_shadows.gd, run window only; H cycles): One Sun = crisp Book Light + fake soft book
+## shadow (the light one), Sun Pair = soft Book Light + crisp copy for Astrid, Soft = the Book Light as saved
+@export_enum("One Sun", "Sun Pair", "Soft") var shadow_mode := 0:
 	set(v):
-		crisp_hero_shadows = v
+		shadow_mode = v
 		if _hero:
-			_hero.enabled = v
+			_hero.mode = v
 			_hero.apply()
-## sun size of Astrid's shadow, in degrees (the Book Light's own sun size stays as it is)
-@export_range(0.0, 10.0, 0.01) var hero_shadow_size := 0.5:
+## sun size of the crisp shadows, in degrees (0 = plain filtered shadow, the cheapest)
+@export_range(0.0, 10.0, 0.01) var hero_shadow_size := 0.0:
 	set(v):
 		hero_shadow_size = v
 		if _hero:
-			_hero.set_size(v)
+			_hero.size = v
+			_hero.apply()
 
 var _ap: AnimationPlayer
 var _clip := ""
@@ -74,8 +77,8 @@ func _ready() -> void:
 	var sun := get_node_or_null("Book Light") as DirectionalLight3D
 	if sun and not Engine.is_editor_hint():
 		_hero = HeroShadows.new()
-		_hero.enabled = crisp_hero_shadows
-		_hero.build(sun, hero_shadow_size)
+		_hero.mode = shadow_mode
+		_hero.build(sun, _book, hero_shadow_size)
 
 func _process(delta: float) -> void:
 	if playing and (not Engine.is_editor_hint() or play_in_editor):
@@ -88,7 +91,7 @@ func _process(delta: float) -> void:
 		lab.visible = show_frame and not Engine.is_editor_hint()
 		lab.text = "frame %d%s%s%s" % [int(frame), "" if playing else "  (paused)",
 				"" if _look == "WOODCUT" else "  look " + _look,
-				"" if crisp_hero_shadows else "  soft hero shadows"]
+				"" if shadow_mode == 0 else "  shadows " + HeroShadows.MODE_NAMES[shadow_mode]]
 
 func _apply() -> void:
 	if not is_inside_tree():
@@ -155,7 +158,7 @@ func _unhandled_input(e: InputEvent) -> void:
 		KEY_F:
 			view = 2 if view != 2 else 0
 		KEY_H:
-			crisp_hero_shadows = not crisp_hero_shadows
+			shadow_mode = (shadow_mode + 1) % HeroShadows.MODE_NAMES.size()
 		KEY_L:   # Astrid's look: WOODCUT -> FLAT -> C4D (astrid_setup.gd, 20 Oct 2026)
 			var a := get_node_or_null("Astrid (import)")
 			if a and a.has_method("next_look"):

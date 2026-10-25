@@ -6,7 +6,7 @@
 # in front of the book (Blender y -100, on the table top 3.56 below her page floor), camera behind her.
 # Test keys (number row): 1 split / single view, 2 camera A lock on / behind her, 3 look (WOODCUT -> FLAT -> C4D, both
 #   fighters; starts on C4D, the book scan), 4 room on / off, 5 tail flakes on / off, 6 shadows on / off, 7 fighter B's own lights on / off,
-#   8 crisp hero shadows on / off (see crisp_hero_shadows),
+#   8 shadow mode (one sun -> sun pair -> soft, see shadow_mode),
 #   9 reset Astrid and the page, 0 pause fighter B. The readout shows timings and the keys.
 # Measuring (real renderer, never --headless):
 #   Godot_console --position 3900,300 --resolution 960x540 --path "F:\WOODCUTS GODOT\alphabet book" res://split_test.tscn ++ measure <out folder>
@@ -30,20 +30,21 @@ const LOOKS := ["WOODCUT", "FLAT", "C4D"]
 @export var playing := true
 ## fighter B starts this many frames later in the same clip
 @export var fighter_b_offset := 525.0
-## Crisp hero shadows (hero_shadows.gd): the Book Light keeps its big soft sun size for the book and table, the
-## fighters' shadows come from a small-sun copy. Run window: 8 toggles.
-@export var crisp_hero_shadows := true:
+## crisp fighter shadows (hero_shadows.gd; run window: 8 cycles): One Sun = crisp Book Light + fake soft book shadow
+## (the light one), Sun Pair = soft Book Light + crisp copy for the fighters, Soft = the Book Light as saved
+@export_enum("One Sun", "Sun Pair", "Soft") var shadow_mode := 0:
 	set(v):
-		crisp_hero_shadows = v
+		shadow_mode = v
 		if _hero:
-			_hero.enabled = v
+			_hero.mode = v
 			_hero.apply()
-## sun size of the fighters' shadows, in degrees (the Book Light's own size stays as it is)
-@export_range(0.0, 10.0, 0.01) var hero_shadow_size := 0.5:
+## sun size of the crisp shadows, in degrees (0 = plain filtered shadow, the cheapest)
+@export_range(0.0, 10.0, 0.01) var hero_shadow_size := 0.0:
 	set(v):
 		hero_shadow_size = v
 		if _hero:
-			_hero.set_size(v)
+			_hero.size = v
+			_hero.apply()
 ## follow cameras: distance behind the fighter and height, in meters
 @export var camera_distance := 4.5
 @export var camera_height := 1.6
@@ -98,11 +99,13 @@ func _ready() -> void:
 	_apply()
 	set_look(_look)
 	_hero = HeroShadows.new()
-	_hero.enabled = crisp_hero_shadows
-	_hero.build(_sun, hero_shadow_size)
+	_hero.mode = shadow_mode
+	_hero.build(_sun, _book, hero_shadow_size)
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 1 and args[0] == "measure":
 		_measure.call_deferred(args[1])
+	elif args.size() > 1 and args[0] == "measure_shadows":
+		_measure.call_deferred(args[1], SHADOW_CASES)
 
 func _first_clip(ap: AnimationPlayer) -> String:
 	if ap == null:
@@ -197,8 +200,8 @@ func _median(a: Array) -> float:
 
 func _stats_line() -> String:
 	var fm := _median(_frame_ms)
-	return "%s  look %s  room %s  flakes %s  shadows %s  crisp hero shadows %s  B lights %s  Astrid: %s\n%.1f fps  frame %.2f ms  GPU %.2f ms  render CPU %.2f ms  draw calls %d  triangles %dk  VRAM %d MB\nW A S D walk  Shift faster  Space jump  E page (hold = lift, tap = turn)  |  1 split  2 camera  3 look  4 room  5 flakes  6 shadows  7 B lights  8 crisp hero shadows  9 reset  0 pause B" % [
-		"SPLIT" if split else "SINGLE", LOOKS[_look], _on(_room.visible), _on(_flakes), _on(_shadows), _on(crisp_hero_shadows), _on(_b_lights),
+	return "%s  look %s  room %s  flakes %s  shadows %s (%s)  B lights %s  Astrid: %s\n%.1f fps  frame %.2f ms  GPU %.2f ms  render CPU %.2f ms  draw calls %d  triangles %dk  VRAM %d MB\nW A S D walk  Shift faster  Space jump  E page (hold = lift, tap = turn)  |  1 split  2 camera  3 look  4 room  5 flakes  6 shadows  7 B lights  8 shadow mode  9 reset  0 pause B" % [
+		"SPLIT" if split else "SINGLE", LOOKS[_look], _on(_room.visible), _on(_flakes), _on(_shadows), HeroShadows.MODE_NAMES[shadow_mode], _on(_b_lights),
 		_player.state_name() if _player else "clip",
 		1000.0 / maxf(fm, 0.001), fm, _gpu_ms(), _cpu_ms(),
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
@@ -257,7 +260,7 @@ func _unhandled_input(e: InputEvent) -> void:
 		KEY_7:
 			set_b_lights(not _b_lights)
 		KEY_8:
-			crisp_hero_shadows = not crisp_hero_shadows
+			shadow_mode = (shadow_mode + 1) % HeroShadows.MODE_NAMES.size()
 		KEY_9:
 			if _player:
 				_player.reset()
@@ -272,10 +275,18 @@ func _case(c: Dictionary) -> void:
 	set_flakes(c.get("flakes", true))
 	set_shadows(c.get("shadows", true))
 	set_b_lights(c.get("b_lights", true))
+	shadow_mode = c.get("shadow_mode", 0)
 
-func _measure(out: String) -> void:
+# `++ measure_shadows <out>`: only the three shadow modes, split, C4D look, everything else on
+const SHADOW_CASES := [
+	{"name": "split, c4d, shadows ONE SUN (crisp + fake book shadow)", "look": "C4D", "shadow_mode": 0},
+	{"name": "split, c4d, shadows SUN PAIR (soft + crisp copy)", "look": "C4D", "shadow_mode": 1},
+	{"name": "split, c4d, shadows SOFT (Book Light as saved)", "look": "C4D", "shadow_mode": 2},
+]
+
+func _measure(out: String, only: Array = []) -> void:
 	DirAccess.make_dir_recursive_absolute(out)
-	var cases := [
+	var cases := only if not only.is_empty() else [
 		{"name": "split, woodcut, room, flakes, shadows (the full test)"},
 		{"name": "single, woodcut", "split": false},
 		{"name": "split, flat", "look": "FLAT"},
@@ -324,9 +335,16 @@ func _measure(out: String) -> void:
 	f.store_string(JSON.stringify({"render_size": [render_size.x, render_size.y], "gpu": RenderingServer.get_video_adapter_name(),
 		"rows": rows}, "  "))
 	f.close()
-	# stills: the split screen running, in each look (frame A 300 / B 825)
-	for lk in LOOKS:
-		_case({"look": lk})
+	# stills: the split screen running, in each look (or each shadow case) (frame A 300 / B 825)
+	var stills := []
+	for i in only.size():
+		stills.append([only[i], "shadows_%d" % only[i]["shadow_mode"]])
+	if only.is_empty():
+		for l in LOOKS:
+			stills.append([{"look": l}, l.to_lower()])
+	for s in stills:
+		var lk: String = s[1]
+		_case(s[0])
 		playing = false
 		_frame_a = 300.0
 		_frame_b = _wrap(300.0 + fighter_b_offset)
@@ -337,8 +355,8 @@ func _measure(out: String) -> void:
 		var img := Image.create(render_size.x, render_size.y, false, ia.get_format())
 		img.blit_rect(ia, Rect2i(Vector2i.ZERO, ia.get_size()), Vector2i.ZERO)
 		img.blit_rect(ib, Rect2i(Vector2i.ZERO, ib.get_size()), Vector2i(ia.get_size().x, 0))
-		img.save_png(out.path_join("split_%s.png" % lk.to_lower()))
-		get_viewport().get_texture().get_image().save_png(out.path_join("window_%s.png" % lk.to_lower()))
+		img.save_png(out.path_join("split_%s.png" % lk))
+		get_viewport().get_texture().get_image().save_png(out.path_join("window_%s.png" % lk))
 		print("[split] wrote stills for ", lk)
 		playing = true
 	get_tree().quit()
