@@ -6,6 +6,7 @@
 # in front of the book (Blender y -100, on the table top 3.56 below her page floor), camera behind her.
 # Test keys (number row): 1 split / single view, 2 camera A lock on / behind her, 3 look (WOODCUT -> FLAT -> C4D, both
 #   fighters; starts on C4D, the book scan), 4 room on / off, 5 tail flakes on / off, 6 shadows on / off, 7 fighter B's own lights on / off,
+#   8 crisp hero shadows on / off (see crisp_hero_shadows),
 #   9 reset Astrid and the page, 0 pause fighter B. The readout shows timings and the keys.
 # Measuring (real renderer, never --headless):
 #   Godot_console --position 3900,300 --resolution 960x540 --path "F:\WOODCUTS GODOT\alphabet book" res://split_test.tscn ++ measure <out folder>
@@ -29,6 +30,20 @@ const LOOKS := ["WOODCUT", "FLAT", "C4D"]
 @export var playing := true
 ## fighter B starts this many frames later in the same clip
 @export var fighter_b_offset := 525.0
+## Crisp hero shadows: the Book Light keeps its big soft sun size for the book and table, but no longer casts the
+## fighters' shadows. A second sun (same direction, small sun size) casts only the fighters, and a matching negative
+## sun cancels its extra light, so the only thing it adds is a crisp fighter shadow. Run window: 8 toggles.
+@export var crisp_hero_shadows := true:
+	set(v):
+		crisp_hero_shadows = v
+		if is_inside_tree():
+			_hero_shadow_apply()
+## sun size of the fighters' shadows, in degrees (the Book Light's own size stays as it is)
+@export_range(0.0, 10.0, 0.01) var hero_shadow_size := 0.5:
+	set(v):
+		hero_shadow_size = v
+		if _hero_sun:
+			_hero_sun.light_angular_distance = v
 ## follow cameras: distance behind the fighter and height, in meters
 @export var camera_distance := 4.5
 @export var camera_height := 1.6
@@ -62,6 +77,9 @@ var _flakes := true
 var _shadows := true
 var _b_lights := true
 var _last_us := 0
+var _hero_sun: DirectionalLight3D
+var _hero_cancel: DirectionalLight3D
+const HERO_LAYER := 1   # Astrid's render layer (astrid_setup.gd layers = 1; flakes 1 | 2)
 var _frame_ms: Array[float] = []
 
 func _ready() -> void:
@@ -80,6 +98,7 @@ func _ready() -> void:
 	_layout()
 	_apply()
 	set_look(_look)
+	_hero_shadow_build()
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 1 and args[0] == "measure":
 		_measure.call_deferred(args[1])
@@ -177,8 +196,8 @@ func _median(a: Array) -> float:
 
 func _stats_line() -> String:
 	var fm := _median(_frame_ms)
-	return "%s  look %s  room %s  flakes %s  shadows %s  B lights %s  Astrid: %s\n%.1f fps  frame %.2f ms  GPU %.2f ms  render CPU %.2f ms  draw calls %d  triangles %dk  VRAM %d MB\nW A S D walk  Shift faster  Space jump  E page (hold = lift, tap = turn)  |  1 split  2 camera  3 look  4 room  5 flakes  6 shadows  7 B lights  9 reset  0 pause B" % [
-		"SPLIT" if split else "SINGLE", LOOKS[_look], _on(_room.visible), _on(_flakes), _on(_shadows), _on(_b_lights),
+	return "%s  look %s  room %s  flakes %s  shadows %s  crisp hero shadows %s  B lights %s  Astrid: %s\n%.1f fps  frame %.2f ms  GPU %.2f ms  render CPU %.2f ms  draw calls %d  triangles %dk  VRAM %d MB\nW A S D walk  Shift faster  Space jump  E page (hold = lift, tap = turn)  |  1 split  2 camera  3 look  4 room  5 flakes  6 shadows  7 B lights  8 crisp hero shadows  9 reset  0 pause B" % [
+		"SPLIT" if split else "SINGLE", LOOKS[_look], _on(_room.visible), _on(_flakes), _on(_shadows), _on(crisp_hero_shadows), _on(_b_lights),
 		_player.state_name() if _player else "clip",
 		1000.0 / maxf(fm, 0.001), fm, _gpu_ms(), _cpu_ms(),
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
@@ -210,6 +229,32 @@ func set_shadows(on: bool) -> void:
 	_sun.shadow_enabled = on
 	for l in _lights_a.get_children() + _lights_b.get_children():
 		(l as Light3D).shadow_enabled = on
+	_hero_shadow_apply()
+
+# two extra suns copied from the Book Light: one casting only the fighters (crisp), one negative with no shadow
+func _hero_shadow_build() -> void:
+	_hero_sun = _sun.duplicate() as DirectionalLight3D
+	_hero_sun.name = "Hero Shadow Sun"
+	_hero_sun.light_angular_distance = hero_shadow_size
+	_hero_sun.shadow_caster_mask = HERO_LAYER
+	_hero_cancel = _sun.duplicate() as DirectionalLight3D
+	_hero_cancel.name = "Hero Shadow Cancel"
+	_hero_cancel.light_negative = true
+	_hero_cancel.shadow_enabled = false
+	_sun.add_sibling(_hero_sun)
+	_sun.add_sibling(_hero_cancel)
+	_hero_shadow_apply()
+
+func _hero_shadow_apply() -> void:
+	if _hero_sun == null:
+		return
+	var on := crisp_hero_shadows and _shadows
+	_sun.shadow_caster_mask = 0xFFFFF & ~HERO_LAYER if on else 0xFFFFF
+	_hero_sun.visible = on
+	_hero_cancel.visible = on
+	for l in [_hero_sun, _hero_cancel]:
+		l.light_energy = _sun.light_energy
+		l.light_color = _sun.light_color
 
 func set_b_lights(on: bool) -> void:
 	_b_lights = on
@@ -234,6 +279,8 @@ func _unhandled_input(e: InputEvent) -> void:
 			set_shadows(not _shadows)
 		KEY_7:
 			set_b_lights(not _b_lights)
+		KEY_8:
+			crisp_hero_shadows = not crisp_hero_shadows
 		KEY_9:
 			if _player:
 				_player.reset()
