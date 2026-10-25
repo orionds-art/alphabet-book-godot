@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" path="res://bedroom_import/bedroom_IMPORT.tscn" id="4_room"]
 [ext_resource type="Texture2D" path="res://paper/BLANK WATERCOLOR PAPER.png" id="5_paper"]
 [ext_resource type="Shader" path="res://paper/paper_scan.gdshader" id="6_scan"]
+[ext_resource type="Script" path="res://player_control.gd" id="7_player"]
 
 [sub_resource type="Environment" id="env"]
 background_mode = 1
@@ -143,7 +144,11 @@ layer = 2
 [node name="Stats" type="Label" parent="HUD"]
 offset_left = 16.0
 offset_top = 12.0
-offset_right = 1400.0
+offset_right = 940.0
+autowrap_mode = 3
 offset_bottom = 90.0
 theme_override_colors/font_color = Color(0.85, 0.2, 0.1, 1)
 text = "split test"
+
+[node name="Player A" type="Node" parent="."]
+script = ExtResource("7_player")

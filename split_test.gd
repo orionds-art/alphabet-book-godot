@@ -1,10 +1,12 @@
-# split_test.gd -- SPLIT SCREEN PERFORMANCE TEST (25 Oct 2026): the bedroom + table + book + two fighters, two views
-# side by side, each with its own follow camera behind its fighter, looking at the other one. No gameplay.
+# split_test.gd -- SPLIT SCREEN TEST (25 Oct 2026): the bedroom + table + book + two fighters, two views side by side,
+# each with its own follow camera. No gameplay rules.
+# Fighter A = Astrid, PLAYED (player_control.gd, node "Player A": W A S D walk, Shift faster, Space jump, E page).
+# Without a "Player A" node she plays the MAIN animation instead.
 # Fighter B is a second Astrid (the dragon is not in Godot yet): same clip, half a clip later, standing on the table
-# in front of the book (Blender y -100, on the table top 3.56 below her page floor). Fighter A plays exactly the MAIN
-# animation (with the page turn).
-# Run window keys: S split / single view, L look (WOODCUT -> FLAT -> C4D, both fighters), R room on / off,
-#   T tail flakes on / off, H shadows on / off, B fighter B's own lights on / off, Space pause. The HUD shows timings.
+# in front of the book (Blender y -100, on the table top 3.56 below her page floor), camera behind her.
+# Test keys (number row): 1 split / single view, 2 camera A lock on / behind her, 3 look (WOODCUT -> FLAT -> C4D, both
+#   fighters), 4 room on / off, 5 tail flakes on / off, 6 shadows on / off, 7 fighter B's own lights on / off,
+#   9 reset Astrid and the page, 0 pause fighter B. The readout shows timings and the keys.
 # Measuring (real renderer, never --headless):
 #   Godot_console --position 3900,300 --resolution 960x540 --path "F:\WOODCUTS GODOT\alphabet book" res://split_test.tscn ++ measure <out folder>
 # Each case: 120 frames warm up (shader compile), then 360 frames sampled; vsync off. Writes <out>/split_measure.json
@@ -45,6 +47,7 @@ const LOOKS := ["WOODCUT", "FLAT", "C4D"]
 @onready var _cam_a: Camera3D = $"Screens/Left/View A/Camera A"
 @onready var _cam_b: Camera3D = $"Screens/Right/View B/Camera B"
 @onready var _hud: Label = $"HUD/Stats"
+@onready var _player: Node = get_node_or_null("Player A")
 
 var _frame_a := FIRST
 var _frame_b := FIRST
@@ -116,7 +119,8 @@ func _process(delta: float) -> void:
 			_frame_ms.pop_front()
 	_last_us = now
 	if playing:
-		_frame_a = _wrap(_frame_a + delta * FPS)
+		if _player == null:
+			_frame_a = _wrap(_frame_a + delta * FPS)
 		_frame_b = _wrap(_frame_b + delta * FPS)
 	_apply()
 	_hud.text = _stats_line()
@@ -125,18 +129,20 @@ func _wrap(f: float) -> float:
 	return FIRST + fposmod(f - FIRST, LAST - FIRST)
 
 func _apply() -> void:
-	if _ap_a and _clip_a != "":
-		_ap_a.seek((_frame_a - FIRST) / FPS, true)
+	if _player == null:
+		if _ap_a and _clip_a != "":
+			_ap_a.seek((_frame_a - FIRST) / FPS, true)
+		if _book.has_method("set_frame"):
+			_book.set_frame(_frame_a)
 	if _ap_b and _clip_b != "":
 		_ap_b.seek((_frame_b - FIRST) / FPS, true)
-	if _book.has_method("set_frame"):
-		_book.set_frame(_frame_a)
 	var pa := _root_a.global_position
 	var pb := _root_b.global_position
 	# her two salon spots follow her ROOT's x / z, at her floor height (as MAIN's Astrid Follow)
 	_lights_a.global_position = Vector3(pa.x, _a.global_position.y, pa.z)
 	_lights_b.global_position = Vector3(pb.x, _b.global_position.y, pb.z)
-	_follow(_cam_a, pa, pb)
+	if _player == null:
+		_follow(_cam_a, pa, pb)
 	_follow(_cam_b, pb, pa)
 
 # behind `me`, on the far side from `other`, looking at the other fighter's middle
@@ -170,8 +176,9 @@ func _median(a: Array) -> float:
 
 func _stats_line() -> String:
 	var fm := _median(_frame_ms)
-	return "%s  look %s  room %s  flakes %s  shadows %s  B lights %s\n%.1f fps  frame %.2f ms  GPU %.2f ms  render CPU %.2f ms  draw calls %d  triangles %dk  VRAM %d MB\nS split  L look  R room  T flakes  H shadows  B fighter B lights  Space pause" % [
+	return "%s  look %s  room %s  flakes %s  shadows %s  B lights %s  Astrid: %s\n%.1f fps  frame %.2f ms  GPU %.2f ms  render CPU %.2f ms  draw calls %d  triangles %dk  VRAM %d MB\nW A S D walk  Shift faster  Space jump  E page (hold = lift, tap = turn)  |  1 split  2 camera  3 look  4 room  5 flakes  6 shadows  7 B lights  9 reset  0 pause B" % [
 		"SPLIT" if split else "SINGLE", LOOKS[_look], _on(_room.visible), _on(_flakes), _on(_shadows), _on(_b_lights),
+		_player.state_name() if _player else "clip",
 		1000.0 / maxf(fm, 0.001), fm, _gpu_ms(), _cpu_ms(),
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
 		int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME) / 1000.0),
@@ -211,19 +218,25 @@ func _unhandled_input(e: InputEvent) -> void:
 	if not (e is InputEventKey) or not e.pressed or e.echo:
 		return
 	match e.keycode:
-		KEY_S:
+		KEY_1:
 			split = not split
-		KEY_L:
+		KEY_2:
+			if _player:
+				_player.camera_mode = 1 - _player.camera_mode
+		KEY_3:
 			set_look((_look + 1) % LOOKS.size())
-		KEY_R:
+		KEY_4:
 			set_room(not _room.visible)
-		KEY_T:
+		KEY_5:
 			set_flakes(not _flakes)
-		KEY_H:
+		KEY_6:
 			set_shadows(not _shadows)
-		KEY_B:
+		KEY_7:
 			set_b_lights(not _b_lights)
-		KEY_SPACE:
+		KEY_9:
+			if _player:
+				_player.reset()
+		KEY_0:
 			playing = not playing
 
 # ------------------------------------------------------------------ measuring
