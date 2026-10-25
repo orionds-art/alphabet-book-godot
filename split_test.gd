@@ -5,7 +5,7 @@
 # Fighter B is a second Astrid (the dragon is not in Godot yet): same clip, half a clip later, standing on the table
 # in front of the book (Blender y -100, on the table top 3.56 below her page floor), camera behind her.
 # Test keys (number row): 1 split / single view, 2 camera A lock on / behind her, 3 look (WOODCUT -> FLAT -> C4D, both
-#   fighters), 4 room on / off, 5 tail flakes on / off, 6 shadows on / off, 7 fighter B's own lights on / off,
+#   fighters; starts on C4D, the book scan), 4 room on / off, 5 tail flakes on / off, 6 shadows on / off, 7 fighter B's own lights on / off,
 #   9 reset Astrid and the page, 0 pause fighter B. The readout shows timings and the keys.
 # Measuring (real renderer, never --headless):
 #   Godot_console --position 3900,300 --resolution 960x540 --path "F:\WOODCUTS GODOT\alphabet book" res://split_test.tscn ++ measure <out folder>
@@ -57,7 +57,7 @@ var _clip_a := ""
 var _clip_b := ""
 var _root_a: Node3D
 var _root_b: Node3D
-var _look := 0
+var _look := 2   # starts on C4D (the book-scan look), Orion 25 Oct 2026
 var _flakes := true
 var _shadows := true
 var _b_lights := true
@@ -79,6 +79,7 @@ func _ready() -> void:
 	get_viewport().size_changed.connect(_layout)
 	_layout()
 	_apply()
+	set_look(_look)
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 1 and args[0] == "measure":
 		_measure.call_deferred(args[1])
